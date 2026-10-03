@@ -1,6 +1,6 @@
 # Routing examples for software development
 
-Use this list when unsure about a step's `operation` or flags: find the closest example and copy its classification. Every row was checked against `route.py` with the current ladder, so the rung shown is what the heuristic returns. If the ladder changes, the list has to be checked again.
+Use this list when unsure about a step's `operation` or flags: find the closest example and copy its classification. The rung and agent names below were checked against the Claude ladder. Codex uses the same operation levels and flags, but its own ladder; use the router's returned agent. If a ladder changes, check the examples again.
 
 The rung does not depend on the amount of code, but on ambiguity, how many components interact, whether the error is reversible and what a silent error costs. 500 lines of boilerplate fit Sonnet low; 5 lines fixing a race condition call for Opus high.
 

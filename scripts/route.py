@@ -6,7 +6,7 @@ from pathlib import Path
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 
-from common import load_config, log_event, check_subscription, last_active_rung, skill_dir, agents_dir
+from common import load_config, log_event, check_subscription, detect_operator, last_active_rung, skill_dir, agents_dir
 
 #-----------------------------------------------------------
 # Functions
@@ -108,7 +108,7 @@ def choose_level(state, config, names, floor, ceiling):
         level = ceiling
         reasons.append(f'capped at {names[ceiling]}')
     if config['backend'] == 'heuristic':
-        return level, reasons, 'heuristic', None
+        return level, reasons, config.get('backend_label', 'heuristic'), None
     #
     try:
         probabilities = laya_probabilities(state, config)
@@ -137,17 +137,22 @@ def alternative_without_approval(ladder, floor, level):
 #-----------------------------------------------------------
 if len(sys.argv) != 2: raise ValueError("usage: python route.py '<state JSON>' or '[<state>, <state>, ...]' for a parallel batch")
 
-# every step runs on the subscription; an API credential in the environment would divert billing
-check_subscription()
+# Claude Code can switch from subscription billing when an API credential is set.
+operator = detect_operator()
+if operator == 'claude':
+    check_subscription()
 
 payload  = json.loads(sys.argv[1])
 is_batch = isinstance(payload, list)
 states   = payload if is_batch else [payload]
-config   = load_config()
+config   = load_config(operator)
 ladder   = config['ladder']
 names    = [rung['agent'] for rung in ladder]
 
 if config['backend'] not in ('heuristic', 'laya'): raise ValueError(f"Invalid backend '{config['backend']}' in ladder.json. Accepted: heuristic, laya")
+if config['backend'] == 'laya' and operator != 'claude':
+    config['backend'] = 'heuristic'
+    config['backend_label'] = 'heuristic (no Codex Laya checkpoint)'
 #-----------------------------------------------------------
 # Check every step before deciding any
 #-----------------------------------------------------------
@@ -167,11 +172,12 @@ decisions = []
 for state, (floor, ceiling) in zip(states, limits_per_step):
     level, reasons, backend, probabilities = choose_level(state, config, names, floor, ceiling)
     rung = ladder[level]
-    if not (agents_dir / f"{rung['agent']}.md").exists(): raise FileNotFoundError(f"Agent {rung['agent']} is not installed. Run: python {skill_dir / 'scripts' / 'install.py'}")
+    if operator == 'claude' and not (agents_dir / f"{rung['agent']}.md").exists(): raise FileNotFoundError(f"Agent {rung['agent']} is not installed. Run: python {skill_dir / 'scripts' / 'install.py'}")
     #
     decision_id = uuid.uuid4().hex[:8]
     records.append({
         'event':          'decision',
+        'operator':       operator,
         'id':             decision_id,
         'batch':          batch_id,
         'state':          state,
@@ -186,6 +192,7 @@ for state, (floor, ceiling) in zip(states, limits_per_step):
         'id':             decision_id,
         'batch':          batch_id,
         'description':    state['description'],
+        'operator':       operator,
         'agent':          rung['agent'],
         'label':          rung['label'],
         'model':          rung['model'],

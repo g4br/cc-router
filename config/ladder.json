@@ -9,7 +9,8 @@
   "max_parallel": 8,
   "agent_skills": ["caveman:caveman", "ponytail:ponytail"],
   "laya_question": "Run by {label}, is this step completed correctly?",
-  "ladder": [
+  "ladders": {
+    "claude": [
     {"agent": "exec-haiku",         "model": "haiku",  "effort": null,     "active": true,  "approval": false, "label": "Haiku",                    "suited_for": "simple mechanical task, no decisions"},
     {"agent": "exec-sonnet-low",    "model": "sonnet", "effort": "low",    "active": true,  "approval": false, "label": "Sonnet at low effort",     "suited_for": "small quick change following an existing pattern"},
     {"agent": "exec-sonnet-medium", "model": "sonnet", "effort": "medium", "active": true,  "approval": false, "label": "Sonnet at medium effort",  "suited_for": "day-to-day work with a clear scope"},
@@ -22,7 +23,18 @@
     {"agent": "exec-fable-medium",  "model": "fable",  "effort": "medium", "active": false, "approval": true,  "label": "Fable at medium effort",   "suited_for": "long autonomous work, root-cause investigation"},
     {"agent": "exec-fable-high",    "model": "fable",  "effort": "high",   "active": false, "approval": true,  "label": "Fable at high effort",     "suited_for": "long autonomous work where errors are costly"},
     {"agent": "exec-fable-xhigh",   "model": "fable",  "effort": "xhigh",  "active": false, "approval": true,  "label": "Fable at xhigh effort",    "suited_for": "long, autonomous, ambiguous work where errors are costly"}
-  ],
+    ],
+    "codex": [
+      {"agent": "exec-luna-low",     "model": "gpt-6-luna",    "effort": "low",    "active": true,  "approval": false, "label": "Luna at low effort",     "suited_for": "simple mechanical task, no decisions"},
+      {"agent": "exec-sol-low",      "model": "gpt-6.1-sol",   "effort": "low",    "active": true,  "approval": false, "label": "Sol at low effort",      "suited_for": "small quick change following an existing pattern"},
+      {"agent": "exec-sol-medium",   "model": "gpt-6.1-sol",   "effort": "medium", "active": true,  "approval": false, "label": "Sol at medium effort",   "suited_for": "day-to-day work with a clear scope"},
+      {"agent": "exec-sol-high",     "model": "gpt-6.1-sol",   "effort": "high",   "active": true,  "approval": false, "label": "Sol at high effort",     "suited_for": "clear scope where verification matters and edge cases are likely"},
+      {"agent": "exec-astra-medium", "model": "gpt-6-astra",   "effort": "medium", "active": true,  "approval": false, "label": "Astra at medium effort", "suited_for": "stronger reasoning with a defined goal: several modules, design judgment"},
+      {"agent": "exec-astra-high",   "model": "gpt-6-astra",   "effort": "high",   "active": true,  "approval": false, "label": "Astra at high effort",   "suited_for": "complex reasoning where errors are costly or the cause is not local"},
+      {"agent": "exec-astra-xhigh",  "model": "gpt-6-astra",   "effort": "xhigh",  "active": true,  "approval": true,  "label": "Astra at xhigh effort",  "suited_for": "deeper reasoning, more tokens, for an open problem"},
+      {"agent": "exec-astra-max",    "model": "gpt-6-astra",   "effort": "max",    "active": true,  "approval": true,  "label": "Astra at max effort",    "suited_for": "hard problem worked through unattended; diminishing returns and prone to overthinking"}
+    ]
+  },
   "base_level_by_operation": {
     "search":          0,
     "read":            0,

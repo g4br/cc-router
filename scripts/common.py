@@ -16,8 +16,6 @@ from datetime import datetime
 skill_dir     = Path(__file__).resolve().parent.parent
 config_file   = skill_dir / 'config' / 'ladder.json'
 agents_dir    = Path.home() / '.claude' / 'agents'
-data_dir      = Path.home() / '.claude' / 'cc-router'
-history_file  = data_dir / 'history.jsonl'
 settings_file = Path.home() / '.claude' / 'settings.json'
 
 # settings Claude Code reads from the project folder, besides the user settings.json
@@ -27,8 +25,28 @@ project_settings_files = [Path('.claude') / 'settings.json', Path('.claude') / '
 non_subscription_vars = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL', 'ANTHROPIC_PROFILE',
                          'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY']
 
-def load_config():
-    return json.loads(config_file.read_text(encoding='utf-8'))
+def detect_operator():
+    override = os.environ.get('CC_ROUTER_OPERATOR', '').lower()
+    if override:
+        if override not in ('claude', 'codex'):
+            raise ValueError('CC_ROUTER_OPERATOR must be claude or codex')
+        return override
+    codex = any(os.environ.get(name) for name in ('CODEX_THREAD_ID', 'CODEX_SESSION_ID'))
+    claude = bool(os.environ.get('CLAUDECODE') or os.environ.get('CLAUDE_CODE_REMOTE'))
+    if codex and claude:
+        raise RuntimeError('Both Codex and Claude Code session markers are set; set CC_ROUTER_OPERATOR explicitly')
+    if codex:
+        return 'codex'
+    if claude:
+        return 'claude'
+    raise RuntimeError('Cannot identify the operator; set CC_ROUTER_OPERATOR=claude or codex')
+
+def load_config(operator=None):
+    operator = operator or detect_operator()
+    config = json.loads(config_file.read_text(encoding='utf-8'))
+    config['ladder'] = config['ladders'][operator]
+    config['operator'] = operator
+    return config
 
 def find_skill(name):
     # 'plugin:skill' lives under ~/.claude/plugins; a bare 'skill' under ~/.claude/skills
@@ -63,8 +81,12 @@ def check_subscription():
         found += [f'{name} in the env of {settings}' for name in non_subscription_vars if name in content.get('env', {})]
     if found: raise RuntimeError(f'Credential outside the subscription: {found}. Remove it before using the router (for example, start Claude Code with env -u ANTHROPIC_API_KEY claude) and check /status.')
 
-def decision_events(decision_id):
+def history_path(operator):
+    return Path.home() / ('.claude' if operator == 'claude' else '.codex') / 'cc-router' / 'history.jsonl'
+
+def decision_events(decision_id, operator=None):
     # returns the decision and the events tied to it; a wrong id would become an orphan record
+    history_file = history_path(operator or detect_operator())
     events = [json.loads(line) for line in history_file.read_text(encoding='utf-8').splitlines()]
     same_id = [e for e in events if e['id'] == decision_id]
     decisions = [e for e in same_id if e['event'] == 'decision']
@@ -73,7 +95,9 @@ def decision_events(decision_id):
 
 def log_event(event):
     # one JSON line per event; appending is safe with several sessions writing
+    operator = event.get('operator') or detect_operator()
+    history_file = history_path(operator)
     event = {'date': datetime.now().astimezone().isoformat(timespec='seconds'), **event}
-    data_dir.mkdir(parents=True, exist_ok=True)
+    history_file.parent.mkdir(parents=True, exist_ok=True)
     with open(history_file, 'a', encoding='utf-8') as f:
         f.write(json.dumps(event, ensure_ascii=False, default=str) + '\n')

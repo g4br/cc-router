@@ -4,7 +4,7 @@ Repository: https://github.com/NandhaKishorM/laya. The fine-tuning guide is in `
 
 ## Why the history alone is not enough
 
-`history.jsonl` only records the result of the configuration that was chosen. It does not say whether a cheaper rung would have handled the same step. For the router to learn P(success | rung) you need the counterfactual: the same step run on other rungs.
+This procedure applies to the Claude ladder. The Codex ladder needs its own data and checkpoint before Laya can choose its rungs; until then it uses the heuristic even when `backend: laya` is selected. `history.jsonl` only records the result of the configuration that was chosen. It does not say whether a cheaper rung would have handled the same step. For the router to learn P(success | rung) you need the counterfactual: the same step run on other rungs.
 
 ## Stages
 

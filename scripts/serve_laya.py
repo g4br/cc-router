@@ -25,7 +25,7 @@ from common import load_config
 if len(sys.argv) != 2: raise ValueError('usage: python serve_laya.py <folder or repo of the fine-tuned checkpoint>')
 
 checkpoint = sys.argv[1]
-config     = load_config()
+config     = load_config('claude')
 name       = config['laya_checkpoint']
 address    = urlparse(config['laya_url'])
 #-----------------------------------------------------------

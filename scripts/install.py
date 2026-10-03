@@ -1,7 +1,7 @@
 import sys
 import json
 
-from common import load_config, check_subscription, last_active_rung, find_skill, agents_dir, data_dir, settings_file
+from common import load_config, check_subscription, detect_operator, last_active_rung, find_skill, agents_dir, history_path, settings_file
 
 #-----------------------------------------------------------
 # Input and paths
@@ -37,12 +37,17 @@ PENDING: what was left out, or "none"
 #-----------------------------------------------------------
 # Build one agent per ladder rung
 #-----------------------------------------------------------
-check_subscription()
-
-config = load_config()
+operator = detect_operator()
+config = load_config(operator)
 last_active_rung(config['ladder'])
+if operator == 'codex':
+    print('Codex uses its native agent tool. No agent files or Claude Code settings are needed.')
+    print(f'History in: {history_path(operator).parent}')
+    sys.exit(0)
+
+check_subscription()
 agents_dir.mkdir(parents=True, exist_ok=True)
-data_dir.mkdir(parents=True, exist_ok=True)
+history_path(operator).parent.mkdir(parents=True, exist_ok=True)
 
 # a skill listed in the frontmatter but not installed is skipped by Claude Code with no warning in the session
 missing = [name for name in config['agent_skills'] if find_skill(name) is None]
@@ -66,7 +71,7 @@ for rung in config['ladder']:
     agent_file.write_text(text, encoding='utf-8')
     print(f'Save: {agent_file}')
 
-print(f'History in: {data_dir}')
+print(f'History in: {history_path(operator).parent}')
 #-----------------------------------------------------------
 # Approval lock in Claude Code
 #-----------------------------------------------------------

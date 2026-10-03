@@ -1,15 +1,17 @@
 ---
 name: cc-router
-description: Routes each step of a multi-step task in Claude Code to a subagent with the model and effort that fit the step's complexity (ladder Haiku → Sonnet low/medium/high → Opus medium/high/xhigh/max → Fable low/medium/high/xhigh), fires independent steps in parallel batches with different models and efforts, justifies every choice to the user, asks for approval from Opus xhigh upward, escalates when a step fails, and logs everything to train a Laya router. Use it whenever you are about to run a long task or one with several steps that can be delegated to subagents, or when the user talks about saving cost or tokens, choosing a model or effort per task, routing steps, or using Haiku for simple work and Opus or Fable for hard work, even without naming the skill.
+description: Route substantial independent task steps to subagents with a model and reasoning effort suited to each step. Detects Claude Code or Codex, uses that operator's ladder, explains decisions, and records outcomes. Use for explicit model routing, cost-aware delegation, or multi-step work that benefits from subagents.
 ---
 
-# cc-router: model and effort router
+# cc-router: operator-aware model and effort router
 
-Each delegated step goes to a subagent whose model and effort are chosen by `scripts/route.py`. The main session, where you are now, stays on the model the user picked: a skill cannot change its own session's model. So the split is: **planning, justifying and checking stay with you; execution goes through the ladder.**
+Each delegated step goes to a subagent whose model and effort are chosen by `scripts/route.py`. The main session stays on its selected model. Plan, justify and verify in the main session; execute delegated steps through the chosen operator's ladder. Follow the host's delegation policy: this skill does not grant permission to spawn agents when higher-priority instructions prohibit it.
 
 Talk to the user in their language. Write the `description` field of each state in English: it is what the Laya router reads.
 
-The ladder lives in `config/ladder.json`, ordered first by family and then by effort:
+The ladders live in `config/ladder.json`. `route.py` detects Codex from `CODEX_THREAD_ID` or `CODEX_SESSION_ID`, and Claude Code from `CLAUDECODE` or `CLAUDE_CODE_REMOTE`. Set `CC_ROUTER_OPERATOR=codex|claude` when neither marker is available or both are present. API keys and `CODEX_HOME` are not operator markers. The returned `operator` field is authoritative for delegation.
+
+The Claude Code ladder is ordered first by family and then by effort:
 
 | Rung | Agent | Model | Effort | Approval | Active by default |
 |---|---|---|---|---|---|
@@ -33,11 +35,16 @@ About the ladder:
 - Fable is off by default because, depending on the plan, it bills usage credits instead of drawing on the subscription (see [Subscription only](#subscription-only)).
 - The order between Opus max and Fable low is an assumption; the history will tell whether it holds.
 
+The Codex ladder has Luna low (rung 0), Sol low/medium/high (1–3), and Astra medium/high/xhigh/max (4–7). These are routing roles, not claims of cross-provider performance equivalence. Codex does not use the Fable rungs or Claude Code agent files. Check available models and supported effort levels in the host before delegation; if a chosen setting is unavailable, do not report that it ran as selected. Route again with an available ceiling or execute directly and disclose the actual model.
+
 In the commands below, `<skill>` is this skill's base directory, shown when it loads.
 
 ## Before first use
 
-Install the caveman and ponytail plugins in Claude Code, one command per message:
+In Codex, install this folder as a Codex skill (for example, under `~/.codex/skills/cc-router`) and invoke it in a session with native subagent tools. No generated agent files, Claude plugins or Claude settings are needed. `install.py` detects Codex and exits without changing Claude Code files.
+
+In Claude Code, install the following plugins, one command per message:
+
 
 ```
 /plugin marketplace add JuliusBrussee/caveman
@@ -52,7 +59,7 @@ Then:
 python <skill>/scripts/install.py
 ```
 
-From `ladder.json`, the script:
+For Claude Code, the script:
 - checks that no credential would move billing off the subscription (see below);
 - checks that the skills in `agent_skills` are installed;
 - writes one agent file per active rung to `~/.claude/agents/` and deletes the file of any inactive rung;
@@ -60,9 +67,9 @@ From `ladder.json`, the script:
 
 Run it again whenever the ladder changes. If `~/.claude/agents/` did not exist when the session started, restart Claude Code so it sees the agents. `route.py` stops with an error if the chosen agent is not installed.
 
-## Subscription only
+## Claude Code subscription
 
-All work runs through Claude Code on the subscription login (Pro, Max, Team or Enterprise). Subagents count against the same usage limit as the main session; routing steps to cheap rungs is exactly what makes that limit go further. No script in this skill calls the Anthropic API.
+The Claude Code path runs on the subscription login (Pro, Max, Team or Enterprise). Its subagents count against the same usage limit as the main session. No script in this skill calls the Anthropic or OpenAI API. The Claude credential check does not run in Codex; Codex account access and billing follow the host's configuration.
 
 There are three ways billing can leave the subscription, and the skill handles each:
 
@@ -82,10 +89,10 @@ There are three ways billing can leave the subscription, and the skill handles e
    python <skill>/scripts/route.py '{"description": "fix grid reader for lon 0-360 and 12Z accumulation", "operation": "implementation", "files": 2, "ambiguous": false, "critical": true}'
    ```
 
-   The output is one JSON line:
+   The output is one JSON line and includes `operator` (`claude` or `codex`):
 
    ```json
-   {"id": "3f9a1c2e", "batch": null, "description": "fix grid reader for lon 0-360 and 12Z accumulation", "agent": "exec-sonnet-high", "label": "Sonnet at high effort", "model": "sonnet", "effort": "high", "suited_for": "clear scope where verification matters and edge cases are likely", "reason": "operation=implementation (rung 2); +1 critical", "below": "Sonnet at medium effort: day-to-day work with a clear scope", "needs_approval": false, "alternative": null, "backend": "heuristic"}
+   {"id": "3f9a1c2e", "operator": "claude", "batch": null, "description": "fix grid reader for lon 0-360 and 12Z accumulation", "agent": "exec-sonnet-high", "label": "Sonnet at high effort", "model": "sonnet", "effort": "high", "suited_for": "clear scope where verification matters and edge cases are likely", "reason": "operation=implementation (rung 2); +1 critical", "below": "Sonnet at medium effort: day-to-day work with a clear scope", "needs_approval": false, "alternative": null, "backend": "heuristic"}
    ```
 
    The JSON goes inside single quotes in the shell. If the description has an apostrophe, rephrase it without one.
@@ -102,7 +109,11 @@ There are three ways billing can leave the subscription, and the skill handles e
 
    The answer is `auto` for a rung without approval, or `approved`/`declined` for what the user answered. The script rejects `auto` on a rung that needs approval.
 
-6. **Delegate to the chosen agent** with `subagent_type` equal to the `agent` field. **Do not pass the `model` parameter in the call**: it overrides the frontmatter model and defeats the routing. The delegation prompt needs three things, because the subagent does not see this conversation:
+6. **Delegate using the detected operator:**
+   - **Claude Code:** call Agent with `subagent_type` equal to `agent`. Do not pass `model`: the generated agent frontmatter already selects it.
+   - **Codex:** use the native subagent tool with the returned `model` and `effort` when it supports both. The `agent` field is a routing identifier for history, not a Codex agent type. Respect the host's concurrency and permission rules. Do not launch a second CLI or API session merely to force a model choice.
+
+   The delegation prompt needs three things, because the subagent may not see this conversation:
    - the goal of the step;
    - the context it needs (files, decisions already made, project conventions);
    - the verification criterion.
@@ -133,12 +144,12 @@ There are three ways billing can leave the subscription, and the skill handles e
 
 ## Parallel batches
 
-Independent steps run at the same time, each on its own rung. One batch mixes models and efforts: for example, a Haiku listing a function's call sites, a Sonnet medium writing a new script and a Sonnet high fixing a grid reader, all in parallel.
+Independent steps may run at the same time, each on its own rung, when the host permits parallel delegation.
 
 **What goes in the same batch**
 - Steps that do not depend on each other's results.
 - Steps that do not write to the same files. In a batch, each state declares `targets`: the files or folders the step writes, or `[]` if it only reads. The router rejects the batch if two steps share a target, including a folder that contains the other's file. Parallel agents writing to the same file overwrite each other without warning. For those steps, run them in sequence or pass `isolation: "worktree"` in the Agent call and merge the changes afterwards.
-- At most `max_parallel` steps (8 by default, in `ladder.json`). Every agent in the batch draws on the same subscription usage window at once, and this limit keeps it from being drained in one go. Claude Code has its own cap of 20 concurrent subagents.
+- At most `max_parallel` steps (8 by default, in `ladder.json`), further limited by the host's available concurrency. For Claude Code, each agent also draws on the subscription usage window.
 
 **Batch flow**
 
@@ -154,15 +165,17 @@ Independent steps run at the same time, each on its own rung. One batch mixes mo
 
 3. **Log the justifications** of the steps that need no approval. The `justify.py` commands can be chained in a single shell call.
 
-4. **Fire the steps that need no approval together**: a single message with several Agent calls, one per step, each with its rung's `subagent_type` and without the `model` parameter. Calls in the same message run at the same time; separate messages would run one after another.
+4. **Fire the steps that need no approval together** with the operator's native agent tool and the settings from step 6 of the per-step protocol.
 
-5. **With those already running, ask for approvals** in a single `AskUserQuestion`, one question per step, with the options from [Approval](#approval). The tool takes up to 4 questions per call; beyond that, make more calls. Log the answers and fire the approved steps, also together in a single message. Each one still goes through the native confirmation of the `permissions.ask` rule.
+5. **For steps that need approval**, ask with the host's user-input tool, log the answers, and run only the approved steps. Claude Code also enforces its generated `permissions.ask` rule.
 
 6. **Check and record each step as it finishes**, without waiting for the whole batch. Failed steps can go back together in a new batch, with `failed_with` in each state, as long as they remain independent.
 
 7. **At the end, report a table** with step, model and effort, and result.
 
-## Lean output: caveman and ponytail
+## Claude Code output plugins
+
+This section applies only in Claude Code. In Codex, follow the host and project instructions for writing style and code.
 
 Everything this skill produces comes out with the least text and code:
 - **caveman** shortens text: answers, justifications, tables and the subagents' reports. Code, commands, paths and error messages stay exact.
@@ -188,7 +201,7 @@ One or two terse sentences per step, starting with the step and the chosen model
 - **Why this rung:** what, in this concrete step, calls for this model and effort. Cite the step (the file, the edge case, the risk), not just the category.
 - **Why not the rung below:** what the rung below lacks for this step. On rung 0, say why you did not do the step directly. On an escalation, say what failed on the previous rung.
 
-Ground it in the router output fields: `suited_for` of the chosen rung, `below` (the rung below and what it is suited for) and `reason` (the operation and flags that added up, or Laya's probabilities). These texts come from the Claude Code documentation's guidance on each level. **Do not invent model behavior** ("Sonnet would get this wrong"): justify by what the step requires, compared with what each rung is suited for.
+Ground it in the router output fields: `suited_for` of the chosen rung, `below` (the rung below and what it is suited for) and `reason` (the operation and flags that added up, or Laya's probabilities on the Claude ladder). These are task-fit heuristics. **Do not invent model behavior** ("Sonnet would get this wrong"): justify by what the step requires, compared with what each rung is suited for.
 
 Examples:
 
@@ -200,9 +213,9 @@ Examples:
 
 ## Approval
 
-Rungs 6 to 11 (`exec-opus-xhigh` and up) only run with the user's explicit approval. When `needs_approval` is `true`:
+Rungs marked `approval: true` in the selected ladder only run with the user's explicit approval. When `needs_approval` is `true`:
 
-1. **Ask with `AskUserQuestion`.** The question carries the justification and what weighs on the subscription limit: these rungs spend much more of the limit per step, and `max` also has diminishing returns and a tendency to overthink. The options are:
+1. **Ask with the host's user-input tool.** The question carries the justification and expected usage impact. The options are:
    - approve the chosen rung (for example, "Approve Opus xhigh");
    - use the `alternative`, when it is not `null` (the most capable rung below that needs no approval);
    - do not run this step.
@@ -210,11 +223,11 @@ Rungs 6 to 11 (`exec-opus-xhigh` and up) only run with the user's explicit appro
    Do not mark any option as recommended: spending is the user's call.
 
 2. **Depending on the answer:**
-   - **Approved:** log `approved` with `justify.py` and delegate. Claude Code will still show the `permissions.ask` confirmation before starting the subagent; that is the lock that does not depend on you, and the user approves again there.
+   - **Approved:** log `approved` with `justify.py` and delegate. Claude Code will also show its native `permissions.ask` confirmation.
    - **Chose the alternative:** log `declined` and run `route.py` with the same state plus `"user_ceiling": "<alternative>"`. The new decision follows the normal protocol.
    - **Do not run:** log `declined` and treat the step as pending in the final report.
 
-3. **No way to ask** (scheduled session or no `AskUserQuestion`): do not delegate these rungs. Leave the step pending, say which rung it asked for and why, and carry on with the steps that do not depend on it. In `dontAsk` mode, the `permissions.ask` rule makes Claude Code deny the call anyway.
+3. **No way to ask:** do not delegate these rungs. Leave the step pending, say which rung it asked for and why, and carry on with independent steps.
 
 ## Filling in the state
 
@@ -248,13 +261,15 @@ Rungs 6 to 11 (`exec-opus-xhigh` and up) only run with the user's explicit appro
 
 The `files > 3`, `ambiguous` and `critical` fields each add one rung.
 
-The `security` operation stops at Opus max. Fable reroutes flagged cybersecurity requests to an earlier model, so climbing past it would not get Fable anyway. With Fable off, `investigation` and `long_task` also stop at Opus max.
+Base rungs above the active ladder are capped at its last rung. On the Claude ladder, `security` stops at Opus max; Fable reroutes flagged cybersecurity requests to an earlier model. On the Codex ladder, `security`, `investigation` and `long_task` cap at Astra max.
 
 **When unsure about the operation or the flags, read `references/examples.md`.** It has 49 software-development cases, one block per rung, all checked against this router.
 
-Fill it in honestly, without inflating it "to be safe". Everything goes to `~/.claude/cc-router/history.jsonl`, the training set for the Laya router. Inflated fields teach the router to overspend, trigger needless approval requests and hide exactly the cases where a cheap rung would do. Underestimating is cheap, because the escalation in step 9 corrects it.
+Fill it in honestly, without inflating it "to be safe". History goes to `~/.claude/cc-router/history.jsonl` or `~/.codex/cc-router/history.jsonl`, according to the operator. The existing Laya checkpoint was trained on the Claude ladder only; when `backend: laya` is selected, Codex uses the heuristic and reports that fallback in `backend` until a separate checkpoint is trained.
 
-## When routing does not happen
+## When the selected settings may not apply
+
+In Codex, native subagent tools, model overrides and effort settings depend on the host. If a tool or setting is unavailable, do not claim that the configured rung ran; report the actual execution or handle the step directly. The checks below apply to Claude Code:
 
 - **`CLAUDE_CODE_EFFORT_LEVEL` set**: it overrides the frontmatter `effort`, and every agent runs at the same effort. Unset it for routing to work.
 - **`CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1`**: Claude Code ignores the agents' `model`.

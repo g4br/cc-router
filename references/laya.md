@@ -1,70 +1,32 @@
-# Switching the heuristic for the Laya router
+# Using the public Laya checkpoint
 
-Repository: https://github.com/NandhaKishorM/laya. The fine-tuning guide is in `docs/finetune.md` and the notebook in `notebooks/laya_finetune_typed_decisions_2xT4_kaggle.ipynb`.
+`cc-router` uses the ready-made English checkpoint [`convaiinnovations/laya`](https://huggingface.co/convaiinnovations/laya) for both Claude Code and Codex. There is no export or training step. The skill sends its task descriptions in English and selects Laya's `english` model explicitly. The Laya server downloads the checkpoint when it loads the model and keeps it available for later requests.
 
-## Why the history alone is not enough
+## Start Laya locally
 
-This procedure applies to the Claude ladder. The Codex ladder needs its own data and checkpoint before Laya can choose its rungs; until then it uses the heuristic even when `backend: laya` is selected. `history.jsonl` only records the result of the configuration that was chosen. It does not say whether a cheaper rung would have handled the same step. For the router to learn P(success | rung) you need the counterfactual: the same step run on other rungs.
+Install the official HTTP server in a Python 3.10+ environment, then run it on loopback:
 
-## Stages
+```bash
+python -m pip install "laya[serve]"
+LAYA_HOST=127.0.0.1 LAYA_MODELS=english laya-serve
+```
 
-1. **Offline collection.**
-   - Pick 300 or more `state` entries from the history, covering every operation.
-   - Run each step on the rungs in headless mode (`claude -p` with the agents installed), always with the same delegation prompt.
-   - Judge success by the step's objective criterion.
-   - If you can, run each step-and-rung pair two or three times. The fraction of successes is exactly the kind of target Laya's training uses (see the next item).
-   - Rungs 6 to 11 need approval. Ask the user for a single approval for the batch, with the list of steps, rungs and repetitions. Run each rung as the main session (`claude -p --agent exec-opus-xhigh "<delegation prompt>"`), not through the Agent tool: in `-p` mode nobody is there to answer the `permissions.ask` confirmation.
-   - **The collection runs on the subscription and spends its limit.** In `-p` mode, an `ANTHROPIC_API_KEY` that is present is used without asking. Before starting, run `python <skill>/scripts/install.py`, which stops if it finds a non-subscription credential, and check `/status`. Do not use `--bare`: that mode does not read the subscription login. On a server without a browser, generate a subscription token with `claude setup-token` and export `CLAUDE_CODE_OAUTH_TOKEN`.
-   - Spread the collection across the subscription's limit windows instead of running everything at once. Only collect on active rungs: with Fable off, it stays out of collection and training.
-   - If you need a judge where there is no objective criterion, use `claude -p` too, never a direct API call.
+The server exposes `http://127.0.0.1:8000/v1/systemone`. One instance serves both operators because they use the same public checkpoint. Keep it running while routing. See Laya's [HTTP API documentation](https://github.com/NandhaKishorM/laya/blob/main/docs/http-api.md) for device, preload, port and authentication settings. If you change its port, update both URLs in `config/ladder.json`. If you set `LAYA_API_KEY` on the server, provide the same value to `route.py`.
 
-2. **Dataset in the notebook's format.**
-   - Training (RLCD) uses target distributions, not hard labels. Each dataset row has `state`, `questions` and `gold`.
-   - `state` is the state JSON.
-   - `questions` has one `choice` question per rung that was run, with `instructions` equal to `laya_question` from `ladder.json` formatted with the rung's `label`, and `criteria` identical to `route.py`'s: A = yes, B = no. Rungs that were not run stay out of the row.
-   - `gold[agent]` is `{"probabilities": {"A": p, "B": 1 - p}, "label": "A" or "B"}`, where p is the fraction of successes (1 or 0 with a single run) and `label` is the most likely option.
-   - The model learns that exact text. If `laya_question`, the `label`s or the `criteria` change, you have to retrain.
-   - In the notebook, replace the two `load_dataset` calls with your file and keep this row schema.
+The default `backend` is `laya` and `laya_enabled_operators` contains both `claude` and `codex`. If the server is unavailable, `route.py` reports the outage and uses the heuristic. A response error from a running server stops routing so a broken request is visible. You can explicitly use `"backend": "heuristic"` in `config/ladder.json`.
 
-3. **Base checkpoint.** The notebook starts from `MODEL_ID = "convaiinnovations/laya"`, the English checkpoint (ModernBERT-large, 421M). The skill's state descriptions and questions are in English, so the notebook runs unchanged and `laya_checkpoint` is `english` in `ladder.json`. If you write descriptions in another language, use the multilingual checkpoint (mmBERT-base, 322M): change `MODEL_ID` and `laya_checkpoint`, and check that the training script accepts mmBERT, which has not been verified.
+## What the decision means
 
-4. **Fine-tuning.** Run the notebook on Kaggle with `GPU T4 x2`. The guide estimates 4 to 5 hours for about 30 thousand questions over four epochs. Hold out 20% of the data yourself for evaluation: the notebook's internal calibration slice is small on purpose and is not meant for validation.
+For each eligible rung, the router asks Laya whether the rung's model profile suits the task and is likely to complete it on the first attempt without rework. It considers the escalation floor, operation ceiling, user ceiling and approval rules. The first rung with score at least `success_threshold` (default 0.8) is selected; if none clears it, the ceiling is selected. These are **zero-shot estimates** for this project's question. The public checkpoint has not been validated against this project's task outcomes, so the threshold must not be described as a measured 80% success guarantee.
 
-5. **Calibration.**
-   - The notebook fits one temperature per question type and writes it to `rl_agent_config.json`. Copy the checkpoint with that file, because without it the calibration is lost.
-   - Check the ECE on your evaluation set. Without calibration, `success_threshold` means nothing.
+When every eligible rung has at least `min_cost_samples` (default 20) observed token counts for the operation, the router compares median tokens divided by the Laya score and selects the lowest value among rungs above the threshold. With incomplete coverage, it uses ladder order. Observations come from completed routed steps, including heuristic fallback and Laya decisions. This comparison is descriptive: a run on one rung does not establish the cost or outcome of another rung for the same task.
 
-6. **Baseline.**
-   - Train embeddings of `description` + the structured fields in a LightGBM, on the same split.
-   - Keep Laya only if it wins, or ties with some operational advantage.
+After verifying a step, record its result and any token count reported by the host:
 
-7. **Serve with `scripts/serve_laya.py`, not with `laya-serve` directly.**
-   - `laya-serve` only knows the three public checkpoints. An unknown name in the request's `model` field is ignored without error and the request falls back to language routing, which would send the router to an untrained checkpoint.
-   - `serve_laya.py` puts the fine-tuned checkpoint in place of the `laya_checkpoint` name and serves the same HTTP contract, listening on the host and port of `laya_url`:
+```bash
+python <skill>/scripts/record.py <id> success 48210 37.5 --no-rework true
+```
 
-     ```bash
-     pip install "laya[serve]"
-     python <skill>/scripts/serve_laya.py /path/to/finetuned_checkpoint
-     ```
+`--no-rework true` means the criterion passed on the first attempt without correction or retry. Use `false` if the final result needed rework. If you learn later that a label was wrong, use `python <skill>/scripts/feedback.py <id> false` (or `true` for a verified first-pass success). The history is stored separately for Claude Code and Codex under `~/.claude/cc-router/history.jsonl` and `~/.codex/cc-router/history.jsonl`.
 
-   - `route.py` sends `"model": laya_checkpoint` in every request, so no request can drift to another checkpoint.
-   - Set `LAYA_DEVICE` to choose the device. If the server is exposed beyond localhost, set `LAYA_API_KEY` on the server and in Claude Code's environment: the server then requires the `Authorization` header and `route.py` sends it.
-
-8. **Turn it on.**
-   - In `ladder.json`, set `"backend"` to `"laya"` and check `laya_url` and `laya_checkpoint`.
-   - Choose `success_threshold` on the evaluation set by plotting cost against failure rate: a higher threshold escalates less but spends more.
-
-## Version changes behind the aliases
-
-The rungs use aliases (`opus`, `sonnet`...), so the question text does not change when a new version ships, and the checkpoint keeps accepting requests. What changes is the meaning: P(success) for "Opus at high effort" was learned on the previous version. When an alias changes version:
-- split the history at the date of the change;
-- collect a new sample with the current version and check calibration (ECE) on it;
-- if calibration got worse, retrain on the new period, or on both periods with more weight on the new one.
-
-## Decision rule with Laya
-
-The router asks for each rung's P(success) in a single call. It picks the cheapest rung, between the escalation floor and the operation's ceiling, whose probability clears `success_threshold`. If none does, it goes to the ceiling. Every rung's probabilities are logged in the history of each decision.
-
-## Collection cost with 12 rungs
-
-Running each step on every active rung spends a lot of the subscription limit, and repeating runs multiplies it. If Fable is on, it adds to that. One option is to run every rung only on a smaller sample. For the remaining steps, run from the heuristic's rung downward until the first failure, which already gives each step's success boundary.
+Model aliases may resolve to new versions over time. Compare outcomes by date when that happens. Adjusting `laya_question`, rung labels or the threshold changes what Laya is asked; check actual outcomes before relying on the new scores. The official [model card](https://huggingface.co/convaiinnovations/laya) describes the checkpoint's general abilities and limits.

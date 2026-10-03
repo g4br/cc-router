@@ -43,6 +43,8 @@ In the commands below, `<skill>` is this skill's base directory, shown when it l
 
 In Codex, install this folder as a Codex skill (for example, under `~/.codex/skills/cc-router`) and invoke it in a session with native subagent tools. Install caveman's Codex skill and ponytail's Codex plugin using the commands in [README.md](README.md#codex). Ponytail's hooks require `node` on the shell's PATH; review and trust them under `/hooks`, then start a new thread. No generated agent files or Claude Code settings are needed. `install.py` detects Codex and exits without changing Claude Code files.
 
+For either operator, start the public Laya checkpoint as described in [references/laya.md](references/laya.md). The router uses it by default and falls back to the heuristic while the local server is unavailable.
+
 In Claude Code, install the following plugins, one command per message:
 
 
@@ -125,13 +127,15 @@ There are three ways billing can leave the subscription, and the skill handles e
 8. **Record the result** with the decision `id`:
 
    ```bash
-   python <skill>/scripts/record.py 3f9a1c2e success 48210 37.5
+   python <skill>/scripts/record.py 3f9a1c2e success 48210 37.5 --no-rework true
    ```
 
    The two trailing numbers (tokens and duration in seconds) come from the subagent's completion notification; leave them out if they are not available. The result is one of:
    - `success`: passed the criterion;
    - `failure`: delivered, but wrong or incomplete;
    - `escalated`: the agent answered `RESULT: ESCALATE`.
+
+   For a successful step, set `--no-rework true` only when its criterion passed on the first attempt without corrections or retries; otherwise set `false`. Record tokens when the host reports them: the quality outcome and token cost are separate observations. If later work reveals rework, correct the label with `python <skill>/scripts/feedback.py <id> false`.
 
    `record.py` rejects the result if there is no logged justification, if the decision needed approval and was not approved, or if it was declined.
 
@@ -265,7 +269,7 @@ Base rungs above the active ladder are capped at its last rung. On the Claude la
 
 **When unsure about the operation or the flags, read `references/examples.md`.** It has 49 software-development cases, one block per rung, all checked against this router.
 
-Fill it in honestly, without inflating it "to be safe". History goes to `~/.claude/cc-router/history.jsonl` or `~/.codex/cc-router/history.jsonl`, according to the operator. The existing Laya checkpoint was trained on the Claude ladder only; when `backend: laya` is selected, Codex uses the heuristic and reports that fallback in `backend` until a separate checkpoint is trained.
+Fill it in honestly, without inflating it "to be safe". History goes to `~/.claude/cc-router/history.jsonl` or `~/.codex/cc-router/history.jsonl`, according to the operator. Both ladders use the same public Laya checkpoint. When `backend: laya` is selected but the operator is absent from `laya_enabled_operators`, routing stays heuristic and reports that fallback in `backend`.
 
 ## When the selected settings may not apply
 
@@ -287,11 +291,11 @@ Each agent's `model` is `haiku`, `sonnet`, `opus` or `fable`, never a version. H
 - **Unsupported effort:** if a new version does not accept a level, Claude Code uses the highest supported level below it.
 - **A family renamed or retired:** then edit `model` in `ladder.json` and run `install.py`.
 
-The side effect lands in the history. When an alias changes version, the same rung starts meaning a different model, and old and new decisions stop being comparable. Every event has a date; when you learn of a version change, note the date to split the periods when training Laya (see `references/laya.md`).
+The side effect lands in the history. When an alias changes version, the same rung starts meaning a different model, and old and new outcomes stop being directly comparable. Every event has a date; use it when comparing periods after a version change (see `references/laya.md`).
 
-## Switching the heuristic for Laya
+## Using the public Laya checkpoint
 
-The heuristic is the starting phase and builds the history. To move to the trained router, read `references/laya.md`. In short: with a fine-tuned checkpoint served by `scripts/serve_laya.py` (plain `laya-serve` cannot load your own checkpoint), set `"backend"` to `"laya"` in `ladder.json`.
+Read [references/laya.md](references/laya.md) to install and run the public `convaiinnovations/laya` checkpoint. No project-specific training is required. Laya is enabled by default for both operators. Its scores for this project's model-selection question have not been validated on local outcomes, so present them as estimates and verify the selected agent's work. Token counts are observed separately; history of only chosen rungs cannot establish how untried rungs would have performed.
 - If the server is down, `route.py` decides with the heuristic and says so in the output's `backend` field and on stderr.
 - If the server answers with an error, the script stops.
 - The escalation floor, the per-operation ceiling, `user_ceiling` and approval apply to both backends.

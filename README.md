@@ -9,12 +9,13 @@ Claude Code and Codex skill (`cc-router`) that routes delegated steps to a subag
 - **Escalation:** a failed step automatically moves up the ladder.
 - **Claude Code subscription:** refuses to run when an Anthropic API credential would change billing; Fable is off by default.
 - **Output helpers:** caveman for text and ponytail for code, with installation paths for Claude Code and Codex.
-- **History:** decisions and results in JSONL, the basis for training a [Laya](https://github.com/NandhaKishorM/laya) router.
+- **Laya:** uses the public [checkpoint](https://huggingface.co/convaiinnovations/laya) directly for both operators, with a heuristic fallback when the local server is unavailable.
+- **History:** decisions, verified outcomes and token counts in operator-specific JSONL files.
 
 ## Requirements
 
 - Claude Code with a subscription (check `/status`) or Codex with native subagent tools.
-- Python 3 (standard library only).
+- Python 3.10+ for the Laya server; the routing scripts use only the standard library.
 - For the output helpers: Node.js and the [caveman](https://github.com/JuliusBrussee/caveman) and [ponytail](https://github.com/DietrichGebert/ponytail) integrations. Ponytail's Codex hooks need `node` on the shell's PATH.
 
 ## Installation
@@ -76,6 +77,25 @@ In Codex, `install.py` detects the operator and exits without changing Claude Co
 
 Ask the operator to use `cc-router` for a task suited to delegation. The full protocol is in [SKILL.md](SKILL.md). Routing depends on the host's permission to delegate and its available models.
 
+## Use the public Laya checkpoint
+
+Install and start the official local server. It downloads `convaiinnovations/laya` when it loads the model:
+
+```bash
+python -m pip install "laya[serve]"
+LAYA_HOST=127.0.0.1 LAYA_MODELS=english laya-serve
+```
+
+Both operators use `http://127.0.0.1:8000/v1/systemone` by default. `backend` is already set to `laya` in `config/ladder.json`; if the server is unavailable, routing falls back to the heuristic. No training or GPU training job is needed. Laya's zero-shot scores for this model-selection question are unvalidated locally, so continue to verify outcomes. See the [Laya guide](references/laya.md) for setup and interpretation.
+
+After each routed step, record whether it passed on the first attempt without rework and include reported token usage when available:
+
+```bash
+python scripts/record.py <decision-id> success 48210 37.5 --no-rework true
+```
+
+Token cost is tracked separately from the outcome because one observed run cannot establish which untried model would have used the fewest tokens.
+
 ## Files
 
 | File | Purpose |
@@ -86,11 +106,11 @@ Ask the operator to use `cc-router` for a task suited to delegation. The full pr
 | `scripts/route.py` | Picks the rung for a step or a batch |
 | `scripts/justify.py` | Logs the justification and the user's answer |
 | `scripts/record.py` | Logs the step's result |
-| `scripts/serve_laya.py` | Serves a fine-tuned Laya checkpoint (optional) |
+| `scripts/feedback.py` | Corrects a no-rework label discovered after recording |
 | `references/examples.md` | 49 routing examples for software development |
-| `references/laya.md` | How to replace the heuristic with a trained Laya router |
+| `references/laya.md` | Public Laya checkpoint setup and decision limits |
 
-History lives in `~/.claude/cc-router/history.jsonl` or `~/.codex/cc-router/history.jsonl`, according to the detected operator. Laya is trained only for the Claude Code ladder.
+History lives in `~/.claude/cc-router/history.jsonl` or `~/.codex/cc-router/history.jsonl`, according to the detected operator.
 
 ## License
 

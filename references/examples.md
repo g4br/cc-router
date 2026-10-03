@@ -142,6 +142,6 @@ Long, autonomous, ambiguous work where errors are costly. **Needs the user's app
 ## Notes on the top rungs
 
 - **Security never climbs to Fable.** Fable runs with classifiers that reroute flagged cybersecurity requests to an earlier model. That is why the `security` operation has its ceiling at Opus max (`ceiling_by_operation` in `ladder.json`). If the step fails at the ceiling, the router stops and tells you to ask the user.
-- **The position of Fable low and Fable medium is an assumption.** The ladder orders by family first and effort second. There is no measurement showing that Fable low beats Opus max. The history, and later Laya, will show whether the order holds.
+- **The position of Fable low and Fable medium is an assumption.** The ladder orders by family first and effort second. There is no measurement showing that Fable low beats Opus max. Compare verified outcomes and token use before treating that order as measured.
 - **Fable is off by default (`active: false`)** because, depending on the plan, it bills usage credits instead of drawing on the subscription, and in `-p` mode it bills without asking. Turn it on only if `/model` does not show "Requires usage credits" on the Fable row.
 - **`investigation` and `long_task` start at Fable medium.** By definition they are steps that do not split well; if you can split one, split it and classify each part.

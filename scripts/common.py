@@ -6,7 +6,7 @@ config/ladder.json, the single source of truth: install.py builds the agents
 from it and route.py decides on it.
 
 The decision and result history lives outside the skill folder, because the
-folder may be read-only and the history is the training set for the router.
+folder may be read-only. It records observed outcomes and token use.
 '''
 import os
 import json
@@ -14,7 +14,7 @@ from pathlib import Path
 from datetime import datetime
 
 skill_dir     = Path(__file__).resolve().parent.parent
-config_file   = skill_dir / 'config' / 'ladder.json'
+config_file   = Path(os.environ.get('CC_ROUTER_CONFIG', skill_dir / 'config' / 'ladder.json'))
 agents_dir    = Path.home() / '.claude' / 'agents'
 settings_file = Path.home() / '.claude' / 'settings.json'
 
@@ -45,8 +45,14 @@ def load_config(operator=None):
     operator = operator or detect_operator()
     config = json.loads(config_file.read_text(encoding='utf-8'))
     config['ladder'] = config['ladders'][operator]
+    config['laya_url'] = config.get('laya_urls', {}).get(operator, config['laya_url'])
     config['operator'] = operator
     return config
+
+def laya_state(state):
+    # Retry controls and write targets influence routing limits, not the task's
+    # intrinsic difficulty sent to the public Laya checkpoint.
+    return {name: state[name] for name in ('description', 'operation', 'files', 'ambiguous', 'critical')}
 
 def find_skill(name):
     # 'plugin:skill' lives under ~/.claude/plugins; a bare 'skill' under ~/.claude/skills

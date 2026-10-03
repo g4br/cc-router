@@ -21,6 +21,11 @@ STATE = json.dumps({
 class RoutingTest(unittest.TestCase):
     def run_script(self, home, script, *args, operator=None, markers=None):
         env = {'HOME': str(home), 'PATH': os.environ.get('PATH', '')}
+        config = json.loads((ROOT / 'config/ladder.json').read_text(encoding='utf-8'))
+        config['backend'] = 'heuristic'
+        config_path = home / 'ladder.json'
+        config_path.write_text(json.dumps(config), encoding='utf-8')
+        env['CC_ROUTER_CONFIG'] = str(config_path)
         if operator:
             env['CC_ROUTER_OPERATOR'] = operator
         env.update(markers or {})

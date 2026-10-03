@@ -1,14 +1,18 @@
 {
-  "backend": "heuristic",
+  "backend": "laya",
   "laya_url": "http://127.0.0.1:8000/v1/systemone",
+  "laya_urls": {"claude": "http://127.0.0.1:8000/v1/systemone", "codex": "http://127.0.0.1:8000/v1/systemone"},
+  "laya_enabled_operators": ["claude", "codex"],
   "laya_checkpoint": "english",
   "laya_timeout_s": 5,
   "success_threshold": 0.8,
+  "min_cost_samples": 20,
   "file_limit": 3,
   "escalation_jump": 2,
   "max_parallel": 8,
   "agent_skills": ["caveman:caveman", "ponytail:ponytail"],
-  "laya_question": "Run by {label}, is this step completed correctly?",
+  "laya_question": "Given this task and the model profile, is {label} suited to completing it on the first attempt without rework? Profile: {suited_for}",
+  "laya_criteria": {"A": "yes, likely to complete the task on the first attempt without rework", "B": "no, likely to fail or need rework"},
   "ladders": {
     "claude": [
     {"agent": "exec-haiku",         "model": "haiku",  "effort": null,     "active": true,  "approval": false, "label": "Haiku",                    "suited_for": "simple mechanical task, no decisions"},

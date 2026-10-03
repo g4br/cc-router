@@ -3,10 +3,11 @@ import sys
 import json
 import uuid
 from pathlib import Path
+from statistics import median
 from urllib.request import Request, urlopen
 from urllib.error import URLError, HTTPError
 
-from common import load_config, log_event, check_subscription, detect_operator, last_active_rung, skill_dir, agents_dir
+from common import load_config, log_event, check_subscription, detect_operator, history_path, laya_state, last_active_rung, skill_dir, agents_dir
 
 #-----------------------------------------------------------
 # Functions
@@ -76,12 +77,11 @@ def laya_probabilities(state, config):
     for rung in config['ladder']:
         questions[rung['agent']] = {
             'type':         'choice',
-            'instructions': config['laya_question'].format(label=rung['label']),
-            'criteria':     {'A': 'yes, completed and verified', 'B': 'no, fails or stays incomplete'},
+            'instructions': config['laya_question'].format(label=rung['label'], suited_for=rung['suited_for']),
+            'criteria':     config['laya_criteria'],
         }
-    # without 'model' Laya picks the checkpoint by language, and the request could land
-    # on a checkpoint other than the fine-tuned one
-    request_body = {'state': state, 'questions': questions, 'model': config['laya_checkpoint']}
+    # Explicitly select the public English checkpoint used by this skill.
+    request_body = {'state': laya_state(state), 'questions': questions, 'model': config['laya_checkpoint']}
     body = json.dumps(request_body, ensure_ascii=False).encode('utf-8')
     headers = {'Content-Type': 'application/json'}
     # laya-serve only requires a key when started with LAYA_API_KEY
@@ -98,6 +98,25 @@ def first_above_threshold(probabilities, names, floor, ceiling, threshold):
             return i
     # no configuration is reliable enough: take the most capable one allowed
     return ceiling
+
+def observed_token_costs(operator, operation, min_samples):
+    history = history_path(operator)
+    if not history.exists():
+        return {}
+    decisions, samples = {}, {}
+    for line in history.read_text(encoding='utf-8').splitlines():
+        event = json.loads(line)
+        if event.get('event') == 'decision':
+            decisions[event['id']] = event
+        elif event.get('event') == 'result':
+            decision = decisions.get(event['id'])
+            tokens = event.get('tokens')
+            if (decision and decision.get('backend', '').startswith(('heuristic', 'laya'))
+                    and decision['state']['operation'] == operation
+                    and not decision['state'].get('failed_with')
+                    and isinstance(tokens, int) and tokens > 0):
+                samples.setdefault(decision['agent'], []).append(tokens)
+    return {name: median(values) for name, values in samples.items() if len(values) >= min_samples}
 
 def choose_level(state, config, names, floor, ceiling):
     level, reasons = heuristic_level(state, config)
@@ -120,7 +139,18 @@ def choose_level(state, config, names, floor, ceiling):
         return level, reasons, 'heuristic (laya unavailable)', None
     #
     level = first_above_threshold(probabilities, names, floor, ceiling, config['success_threshold'])
+    eligible = [i for i in range(floor, ceiling + 1)
+                if probabilities[names[i]] >= config['success_threshold']]
+    costs = observed_token_costs(config['operator'], state['operation'], config['min_cost_samples'])
+    cost_reason = None
+    if eligible and all(names[i] in costs for i in eligible):
+        level = min(eligible, key=lambda i: (costs[names[i]] / probabilities[names[i]], i))
+        cost_reason = f'estimated tokens per first-pass success={costs[names[level]] / probabilities[names[level]]:.0f}'
     reasons = [f"P(success)={probabilities[names[level]]:.3f}, threshold {config['success_threshold']}, floor {floor}, ceiling {ceiling}"]
+    if cost_reason:
+        reasons.append(cost_reason)
+    elif eligible:
+        reasons.append(f'token estimates incomplete (<{config["min_cost_samples"]} samples per eligible rung); using ladder order')
     if level > 0:
         reasons.append(f"rung below at P(success)={probabilities[names[level - 1]]:.3f}")
     return level, reasons, 'laya', probabilities
@@ -150,9 +180,9 @@ ladder   = config['ladder']
 names    = [rung['agent'] for rung in ladder]
 
 if config['backend'] not in ('heuristic', 'laya'): raise ValueError(f"Invalid backend '{config['backend']}' in ladder.json. Accepted: heuristic, laya")
-if config['backend'] == 'laya' and operator != 'claude':
+if config['backend'] == 'laya' and operator not in config['laya_enabled_operators']:
     config['backend'] = 'heuristic'
-    config['backend_label'] = 'heuristic (no Codex Laya checkpoint)'
+    config['backend_label'] = f'heuristic (no enabled {operator} Laya checkpoint)'
 #-----------------------------------------------------------
 # Check every step before deciding any
 #-----------------------------------------------------------

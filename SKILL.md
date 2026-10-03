@@ -41,7 +41,7 @@ In the commands below, `<skill>` is this skill's base directory, shown when it l
 
 ## Before first use
 
-In Codex, install this folder as a Codex skill (for example, under `~/.codex/skills/cc-router`) and invoke it in a session with native subagent tools. No generated agent files, Claude plugins or Claude settings are needed. `install.py` detects Codex and exits without changing Claude Code files.
+In Codex, install this folder as a Codex skill (for example, under `~/.codex/skills/cc-router`) and invoke it in a session with native subagent tools. Install caveman's Codex skill and ponytail's Codex plugin using the commands in [README.md](README.md#codex). Ponytail's hooks require `node` on the shell's PATH; review and trust them under `/hooks`, then start a new thread. No generated agent files or Claude Code settings are needed. `install.py` detects Codex and exits without changing Claude Code files.
 
 In Claude Code, install the following plugins, one command per message:
 
@@ -173,17 +173,17 @@ Independent steps may run at the same time, each on its own rung, when the host 
 
 7. **At the end, report a table** with step, model and effort, and result.
 
-## Claude Code output plugins
+## Output helpers
 
-This section applies only in Claude Code. In Codex, follow the host and project instructions for writing style and code.
+Claude Code uses caveman and ponytail as plugins. Codex uses caveman as a skill and ponytail as a plugin; see [installation](README.md#codex). Follow the host and project's rules if they conflict with these helpers.
 
 Everything this skill produces comes out with the least text and code:
 - **caveman** shortens text: answers, justifications, tables and the subagents' reports. Code, commands, paths and error messages stay exact.
 - **ponytail** shortens code: the least code that works, no speculative abstractions, standard library before dependencies. Validation, error handling and security are never cut.
 
-**In the main session (you):** the ponytail plugin turns itself on through its session-start hook. For either of the two whose rules are not in your context, invoke `caveman` and `ponytail` with the Skill tool before the first step.
+**In the main session (you):** in Claude Code, ponytail turns itself on through its session-start hook. In Codex, its hooks take effect after they are trusted and a new thread starts. Invoke an installed helper skill when its rules are needed and are not already in context.
 
-**In the subagents:** `install.py` preloads both in each agent's frontmatter (`agent_skills` in `ladder.json`) and stops with an error if either is missing. Without that, the listed skill would be skipped silently. This is where the biggest gain is: a terse report takes less of your context on every step.
+**In Claude Code subagents:** `install.py` preloads both in each agent's frontmatter (`agent_skills` in `ladder.json`) and stops with an error if either is missing. In Codex, native subagents use the skills and hooks available to that host; do not assume that the Claude Code frontmatter applies there.
 
 **What does not shrink:**
 - the approval question: full justification, cost and options, because it is the user's spending decision;

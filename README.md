@@ -8,24 +8,47 @@ Claude Code and Codex skill (`cc-router`) that routes delegated steps to a subag
 - **Approval:** high-cost rungs require an explicit answer; Claude Code also uses a `permissions.ask` rule.
 - **Escalation:** a failed step automatically moves up the ladder.
 - **Claude Code subscription:** refuses to run when an Anthropic API credential would change billing; Fable is off by default.
-- **Claude Code output plugins:** caveman for text, ponytail for code.
+- **Output helpers:** caveman for text and ponytail for code, with installation paths for Claude Code and Codex.
 - **History:** decisions and results in JSONL, the basis for training a [Laya](https://github.com/NandhaKishorM/laya) router.
 
 ## Requirements
 
 - Claude Code with a subscription (check `/status`) or Codex with native subagent tools.
 - Python 3 (standard library only).
-- For Claude Code only: the [caveman](https://github.com/JuliusBrussee/caveman) and [ponytail](https://github.com/DietrichGebert/ponytail) plugins.
+- For the output helpers: Node.js and the [caveman](https://github.com/JuliusBrussee/caveman) and [ponytail](https://github.com/DietrichGebert/ponytail) integrations. Ponytail's Codex hooks need `node` on the shell's PATH.
 
 ## Installation
+
+### Codex
+
+```bash
+git clone https://github.com/g4br/cc-router ~/.codex/skills/cc-router
+```
+
+Codex's native agent tool uses the model and effort returned by `route.py`; no generated agent files are needed.
+
+Install caveman's **skill** for Codex, using the command from its [official README](https://github.com/JuliusBrussee/caveman):
+
+```bash
+npx skills add JuliusBrussee/caveman --skill '*' -a codex --yes -g
+```
+
+This installs the skill, not caveman's optional proxy. Install the [ponytail Codex plugin](https://github.com/DietrichGebert/ponytail) with its official commands:
+
+```bash
+codex plugin marketplace add DietrichGebert/ponytail
+codex plugin add ponytail@ponytail
+```
+
+Start Codex, open `/hooks`, review and trust ponytail's two lifecycle hooks, then start a new thread. For the Codex desktop app, restart the app after installation. `node` must be on the PATH used by the hooks.
+
+### Claude Code
 
 ```bash
 git clone https://github.com/g4br/cc-router ~/.claude/skills/cc-router
 ```
 
-For Codex, clone the repository under `~/.codex/skills/cc-router` instead. Its native agent tool uses the model and effort returned by `route.py`; no generated agent files are needed.
-
-In Claude Code, one command per message:
+Install the two plugins, one command per message:
 
 ```
 /plugin marketplace add JuliusBrussee/caveman

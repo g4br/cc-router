@@ -1,4 +1,4 @@
-# claude-router
+# cc-router
 
 Claude Code and Codex skill (`cc-router`) that routes delegated steps to a subagent with a model and effort suited to the step.
 
@@ -20,7 +20,7 @@ Claude Code and Codex skill (`cc-router`) that routes delegated steps to a subag
 ## Installation
 
 ```bash
-git clone https://github.com/g4br/claude-router ~/.claude/skills/cc-router
+git clone https://github.com/g4br/cc-router ~/.claude/skills/cc-router
 ```
 
 For Codex, clone the repository under `~/.codex/skills/cc-router` instead. Its native agent tool uses the model and effort returned by `route.py`; no generated agent files are needed.

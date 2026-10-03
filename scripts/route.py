@@ -17,6 +17,8 @@ def check_state(state, config):
     missing = [field for field in required if field not in state]
     if missing: raise ValueError(f'State missing fields {missing}. Required: {required}. Step: {state.get("description")}')
     if state['operation'] not in config['base_level_by_operation']: raise ValueError(f"Invalid operation '{state['operation']}'. Accepted: {list(config['base_level_by_operation'])}")
+    if 'user_language' in state and (not isinstance(state['user_language'], str) or not state['user_language'].strip()):
+        raise ValueError('user_language must be a nonempty language name or code')
 
 def overlaps(target_a, target_b):
     # same file, or one is a folder that contains the other
@@ -222,6 +224,7 @@ for state, (floor, ceiling) in zip(states, limits_per_step):
         'id':             decision_id,
         'batch':          batch_id,
         'description':    state['description'],
+        'user_language':  state.get('user_language'),
         'operator':       operator,
         'agent':          rung['agent'],
         'label':          rung['label'],

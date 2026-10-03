@@ -62,14 +62,17 @@ class LayaRoutingTest(unittest.TestCase):
                 history.write_text(''.join(json.dumps(event) + '\n' for event in events))
                 env = {'HOME': str(home), 'PATH': os.environ.get('PATH', ''),
                        'CC_ROUTER_OPERATOR': 'codex', 'CC_ROUTER_CONFIG': str(config_path)}
-                payload = dict(state, description='new task', failed_with=None)
+                payload = dict(state, description='new task', user_language='pt-BR', failed_with=None)
                 result = subprocess.run([sys.executable, str(ROOT / 'scripts/route.py'), json.dumps(payload)],
                                         cwd=ROOT, env=env, text=True, capture_output=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 decision = json.loads(result.stdout)
                 self.assertEqual(decision['agent'], 'exec-sol-high')
+                self.assertEqual(decision['user_language'], 'pt-BR')
                 self.assertIn('estimated tokens', decision['reason'])
                 self.assertNotIn('failed_with', LayaHandler.received['state'])
+                self.assertNotIn('user_language', LayaHandler.received['state'])
+                self.assertEqual(LayaHandler.received['state']['description'], 'new task')
                 self.assertEqual(LayaHandler.received['model'], 'english')
                 self.assertIn('clear scope where verification matters',
                               LayaHandler.received['questions']['exec-sol-high']['instructions'])

@@ -7,7 +7,7 @@ description: Route substantial independent task steps to subagents with a model 
 
 Each delegated step goes to a subagent whose model and effort are chosen by `scripts/route.py`. The main session stays on its selected model. Plan, justify and verify in the main session; execute delegated steps through the chosen operator's ladder. Follow the host's delegation policy: this skill does not grant permission to spawn agents when higher-priority instructions prohibit it.
 
-Talk to the user in their language. Write the `description` field of each state in English: it is what the Laya router reads.
+Determine the user's primary language from their request and conversation. For each step, translate a short, faithful task summary into English for the `description` field; Laya reads this summary when choosing the model and effort together. Preserve paths, commands, identifiers, constraints and the verification criterion. Put the user's language in `user_language` (for example, `pt-BR`). Address the user in that language, and have subagents report in it unless the user explicitly requests another output language.
 
 The ladders live in `config/ladder.json`. `route.py` detects Codex from `CODEX_THREAD_ID` or `CODEX_SESSION_ID`, and Claude Code from `CLAUDECODE` or `CLAUDE_CODE_REMOTE`. Set `CC_ROUTER_OPERATOR=codex|claude` when neither marker is available or both are present. API keys and `CODEX_HOME` are not operator markers. The returned `operator` field is authoritative for delegation.
 
@@ -67,7 +67,7 @@ For Claude Code, the script:
 - writes one agent file per active rung to `~/.claude/agents/` and deletes the file of any inactive rung;
 - writes a `permissions.ask` rule `Agent(<agent>)` to `~/.claude/settings.json` for each rung that needs approval. It only rewrites `Agent(exec-...)` rules and keeps the rest of the file.
 
-Run it again whenever the ladder changes. If `~/.claude/agents/` did not exist when the session started, restart Claude Code so it sees the agents. `route.py` stops with an error if the chosen agent is not installed.
+Run it again whenever the ladder or this skill's agent instructions change. If `~/.claude/agents/` did not exist when the session started, restart Claude Code so it sees the agents. `route.py` stops with an error if the chosen agent is not installed.
 
 ## Claude Code subscription
 
@@ -88,13 +88,13 @@ There are three ways billing can leave the subscription, and the skill handles e
 3. **Build the state and run the router:**
 
    ```bash
-   python <skill>/scripts/route.py '{"description": "fix grid reader for lon 0-360 and 12Z accumulation", "operation": "implementation", "files": 2, "ambiguous": false, "critical": true}'
+   python <skill>/scripts/route.py '{"description": "fix grid reader for lon 0-360 and 12Z accumulation", "user_language": "pt-BR", "operation": "implementation", "files": 2, "ambiguous": false, "critical": true}'
    ```
 
    The output is one JSON line and includes `operator` (`claude` or `codex`):
 
    ```json
-   {"id": "3f9a1c2e", "operator": "claude", "batch": null, "description": "fix grid reader for lon 0-360 and 12Z accumulation", "agent": "exec-sonnet-high", "label": "Sonnet at high effort", "model": "sonnet", "effort": "high", "suited_for": "clear scope where verification matters and edge cases are likely", "reason": "operation=implementation (rung 2); +1 critical", "below": "Sonnet at medium effort: day-to-day work with a clear scope", "needs_approval": false, "alternative": null, "backend": "heuristic"}
+   {"id": "3f9a1c2e", "operator": "claude", "batch": null, "description": "fix grid reader for lon 0-360 and 12Z accumulation", "user_language": "pt-BR", "agent": "exec-sonnet-high", "label": "Sonnet at high effort", "model": "sonnet", "effort": "high", "suited_for": "clear scope where verification matters and edge cases are likely", "reason": "operation=implementation (rung 2); +1 critical", "below": "Sonnet at medium effort: day-to-day work with a clear scope", "needs_approval": false, "alternative": null, "backend": "heuristic"}
    ```
 
    The JSON goes inside single quotes in the shell. If the description has an apostrophe, rephrase it without one.
@@ -115,10 +115,11 @@ There are three ways billing can leave the subscription, and the skill handles e
    - **Claude Code:** call Agent with `subagent_type` equal to `agent`. Do not pass `model`: the generated agent frontmatter already selects it.
    - **Codex:** use the native subagent tool with the returned `model` and `effort` when it supports both. The `agent` field is a routing identifier for history, not a Codex agent type. Respect the host's concurrency and permission rules. Do not launch a second CLI or API session merely to force a model choice.
 
-   The delegation prompt needs three things, because the subagent may not see this conversation:
+   The delegation prompt needs these details, because the subagent may not see this conversation:
    - the goal of the step;
    - the context it needs (files, decisions already made, project conventions);
    - the verification criterion.
+   - the `user_language` and an instruction to report in that language. Keep the task's explicitly requested output language for files or deliverables.
 
    The report format is already in the agent's system prompt.
 
@@ -160,7 +161,7 @@ Independent steps may run at the same time, each on its own rung, when the host 
 1. **Run the router once with the list of states:**
 
    ```bash
-   python <skill>/scripts/route.py '[{"description": "list call sites of calc_eto", "operation": "search", "files": 1, "ambiguous": false, "critical": false, "targets": []}, {"description": "script for an ERA5-Land point series", "operation": "implementation", "files": 1, "ambiguous": false, "critical": false, "targets": ["scripts/era5_point.py"]}]'
+   python <skill>/scripts/route.py '[{"description": "list call sites of calc_eto", "user_language": "pt-BR", "operation": "search", "files": 1, "ambiguous": false, "critical": false, "targets": []}, {"description": "script for an ERA5-Land point series", "user_language": "pt-BR", "operation": "implementation", "files": 1, "ambiguous": false, "critical": false, "targets": ["scripts/era5_point.py"]}]'
    ```
 
    The output is a list of decisions, one per step, in the same order, each with its own `id` and all with the same `batch`. If any step is invalid, nothing is logged.
@@ -237,7 +238,8 @@ Rungs marked `approval: true` in the selected ladder only run with the user's ex
 
 | Field | Type | Meaning |
 |---|---|---|
-| `description` | text | The step in one sentence, in English |
+| `description` | text | Faithful English summary of the user's step; Laya uses it to choose model and effort |
+| `user_language` | text, optional for direct CLI callers | User's primary response language, such as `pt-BR`; copied to router output, not sent to Laya |
 | `operation` | text | One of the categories below |
 | `files` | integer | How many files or artifacts the step reads or changes substantially |
 | `ambiguous` | bool | `true` if the step allows more than one reasonable interpretation or depends on a design decision not yet made |

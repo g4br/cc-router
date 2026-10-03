@@ -89,6 +89,7 @@ class RoutingTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             agent = (home / '.claude/agents/exec-sonnet-medium.md').read_text(encoding='utf-8')
             self.assertIn('model: sonnet', agent)
+            self.assertIn("Write the report in the user's language", agent)
             rules = json.loads(settings.read_text(encoding='utf-8'))['permissions']['ask']
             self.assertIn('Bash(rm *)', rules)
             self.assertIn('Agent(exec-opus-xhigh)', rules)

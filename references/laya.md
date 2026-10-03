@@ -1,17 +1,17 @@
 # Using the public Laya checkpoint
 
-`cc-router` uses the ready-made English checkpoint [`convaiinnovations/laya`](https://huggingface.co/convaiinnovations/laya) for both Claude Code and Codex. There is no export or training step. The skill sends its task descriptions in English and selects Laya's `english` model explicitly. The Laya server downloads the checkpoint when it loads the model and keeps it available for later requests.
+`cc-router` uses the ready-made English checkpoint [`convaiinnovations/laya`](https://huggingface.co/convaiinnovations/laya) for both Claude Code and Codex. There is no export or training step. Before routing, the operator translates the user's task summary into English in `description`; Laya chooses a model and effort from that state. The operator keeps `user_language` for the subagent's report and the final answer, and this field is not sent to Laya. The server downloads the checkpoint when it loads the model and keeps it available for later requests.
 
 ## Start Laya locally
 
-Install the official HTTP server in a Python 3.10+ environment, then run it on loopback:
+Install the official HTTP server in a Python 3.10+ environment, then run the skill's launcher:
 
 ```bash
 python -m pip install "laya[serve]"
-LAYA_HOST=127.0.0.1 LAYA_MODELS=english laya-serve
+python <skill>/scripts/serve_laya.py
 ```
 
-The server exposes `http://127.0.0.1:8000/v1/systemone`. One instance serves both operators because they use the same public checkpoint. Keep it running while routing. See Laya's [HTTP API documentation](https://github.com/NandhaKishorM/laya/blob/main/docs/http-api.md) for device, preload, port and authentication settings. If you change its port, update both URLs in `config/ladder.json`. If you set `LAYA_API_KEY` on the server, provide the same value to `route.py`.
+The launcher tests a small PyTorch operation on each available GPU in a separate process. It selects a working GPU or CPU if none can run, then starts the official server on loopback with the English checkpoint. This avoids using the MX350 with a PyTorch build that lacks `sm_61` kernels. The server exposes `http://127.0.0.1:8000/v1/systemone`. One instance serves both operators. Keep it running while routing. See Laya's [HTTP API documentation](https://github.com/NandhaKishorM/laya/blob/main/docs/http-api.md) for preload, port and authentication settings. If you change its port, update both URLs in `config/ladder.json`. If you set `LAYA_API_KEY` on the server, provide the same value to `route.py`.
 
 The default `backend` is `laya` and `laya_enabled_operators` contains both `claude` and `codex`. If the server is unavailable, `route.py` reports the outage and uses the heuristic. A response error from a running server stops routing so a broken request is visible. You can explicitly use `"backend": "heuristic"` in `config/ladder.json`.
 

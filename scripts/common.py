@@ -50,8 +50,8 @@ def load_config(operator=None):
     return config
 
 def laya_state(state):
-    # Retry controls and write targets influence routing limits, not the task's
-    # intrinsic difficulty sent to the public Laya checkpoint.
+    # The operator writes description in English for Laya. User language, retry
+    # controls and write targets stay out of the task-difficulty input.
     return {name: state[name] for name in ('description', 'operation', 'files', 'ambiguous', 'critical')}
 
 def find_skill(name):

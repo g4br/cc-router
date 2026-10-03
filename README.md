@@ -79,14 +79,31 @@ Ask the operator to use `cc-router` for a task suited to delegation. The full pr
 
 ## Use the public Laya checkpoint
 
-Install and start the official local server. It downloads `convaiinnovations/laya` when it loads the model:
+Install Laya once:
 
 ```bash
 python -m pip install "laya[serve]"
-LAYA_HOST=127.0.0.1 LAYA_MODELS=english laya-serve
 ```
 
+Run the minimal SDK example from this repository in another terminal. It asks Laya to choose `low`, `medium` or `high` effort for `gpt-6.1-sol` on a sample task; the first run downloads the checkpoint:
+
+```bash
+python laya-example.py
+```
+
+Pass a different task in English to try it: `python laya-example.py "Debug a failing parser test"`.
+
+For regular `cc-router` routing, start the bundled launcher for the official local server:
+
+```bash
+python scripts/serve_laya.py
+```
+
+The example and server launcher test a small PyTorch operation on available GPUs. They use a working GPU or fall back to CPU, including on an MX350 with a PyTorch build that cannot run `sm_61` kernels. The server listens on `127.0.0.1:8000` and loads only the English checkpoint by default.
+
 Both operators use `http://127.0.0.1:8000/v1/systemone` by default. `backend` is already set to `laya` in `config/ladder.json`; if the server is unavailable, routing falls back to the heuristic. No training or GPU training job is needed. Laya's zero-shot scores for this model-selection question are unvalidated locally, so continue to verify outcomes. See the [Laya guide](references/laya.md) for setup and interpretation.
+
+The skill translates each task summary into English for Laya to select the model and effort. It keeps the user's primary language for the delegated agent's report and the final response.
 
 After each routed step, record whether it passed on the first attempt without rework and include reported token usage when available:
 
@@ -101,12 +118,15 @@ Token cost is tracked separately from the outcome because one observed run canno
 | File | Purpose |
 |---|---|
 | `SKILL.md` | Orchestrator protocol |
+| `laya-example.py` | Example of Laya choosing effort for a fixed model |
 | `config/ladder.json` | Operator-specific ladders, heuristic, limits and settings |
 | `scripts/install.py` | Builds the agents and the approval rules |
 | `scripts/route.py` | Picks the rung for a step or a batch |
 | `scripts/justify.py` | Logs the justification and the user's answer |
 | `scripts/record.py` | Logs the step's result |
 | `scripts/feedback.py` | Corrects a no-rework label discovered after recording |
+| `scripts/laya_device.py` | Checks which GPU can run PyTorch, with CPU fallback |
+| `scripts/serve_laya.py` | Starts the official Laya server on the selected device |
 | `references/examples.md` | 49 routing examples for software development |
 | `references/laya.md` | Public Laya checkpoint setup and decision limits |
 

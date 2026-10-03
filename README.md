@@ -20,7 +20,7 @@ Claude Code skill (`cc-router`) that routes each step of a task to a subagent wi
 ## Installation
 
 ```bash
-git clone https://github.com/g4br/claude-router ~/.claude/skills/cc-router
+git clone https://github.com/g4br/cc-router ~/.claude/skills/cc-router
 ```
 
 In Claude Code, one command per message:

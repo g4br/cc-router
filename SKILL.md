@@ -1,0 +1,282 @@
+---
+name: cc-router
+description: Routes each step of a multi-step task in Claude Code to a subagent with the model and effort that fit the step's complexity (ladder Haiku → Sonnet low/medium/high → Opus medium/high/xhigh/max → Fable low/medium/high/xhigh), fires independent steps in parallel batches with different models and efforts, justifies every choice to the user, asks for approval from Opus xhigh upward, escalates when a step fails, and logs everything to train a Laya router. Use it whenever you are about to run a long task or one with several steps that can be delegated to subagents, or when the user talks about saving cost or tokens, choosing a model or effort per task, routing steps, or using Haiku for simple work and Opus or Fable for hard work, even without naming the skill.
+---
+
+# cc-router: model and effort router
+
+Each delegated step goes to a subagent whose model and effort are chosen by `scripts/route.py`. The main session, where you are now, stays on the model the user picked: a skill cannot change its own session's model. So the split is: **planning, justifying and checking stay with you; execution goes through the ladder.**
+
+Talk to the user in their language. Write the `description` field of each state in English: it is what the Laya router reads.
+
+The ladder lives in `config/ladder.json`, ordered first by family and then by effort:
+
+| Rung | Agent | Model | Effort | Approval | Active by default |
+|---|---|---|---|---|---|
+| 0 | `exec-haiku` | `haiku` | (none) | no | yes |
+| 1 | `exec-sonnet-low` | `sonnet` | low | no | yes |
+| 2 | `exec-sonnet-medium` | `sonnet` | medium | no | yes |
+| 3 | `exec-sonnet-high` | `sonnet` | high | no | yes |
+| 4 | `exec-opus-medium` | `opus` | medium | no | yes |
+| 5 | `exec-opus-high` | `opus` | high | no | yes |
+| 6 | `exec-opus-xhigh` | `opus` | xhigh | **yes** | yes |
+| 7 | `exec-opus-max` | `opus` | max | **yes** | yes |
+| 8 | `exec-fable-low` | `fable` | low | **yes** | **no** |
+| 9 | `exec-fable-medium` | `fable` | medium | **yes** | **no** |
+| 10 | `exec-fable-high` | `fable` | high | **yes** | **no** |
+| 11 | `exec-fable-xhigh` | `fable` | xhigh | **yes** | **no** |
+
+About the ladder:
+- Models are family aliases: each points to the latest version of the family in Claude Code, so a new version comes in without touching the skill. Details in [Model aliases](#model-aliases).
+- The current Haiku takes no effort, so rung 0 has no such field. If a future version does, add rungs in `ladder.json`.
+- A rung with `"active": false` is not installed and becomes the ceiling: the router never picks above the last active rung. Inactive rungs may only sit at the top.
+- Fable is off by default because, depending on the plan, it bills usage credits instead of drawing on the subscription (see [Subscription only](#subscription-only)).
+- The order between Opus max and Fable low is an assumption; the history will tell whether it holds.
+
+In the commands below, `<skill>` is this skill's base directory, shown when it loads.
+
+## Before first use
+
+Install the caveman and ponytail plugins in Claude Code, one command per message:
+
+```
+/plugin marketplace add JuliusBrussee/caveman
+/plugin install caveman@caveman
+/plugin marketplace add DietrichGebert/ponytail
+/plugin install ponytail@ponytail
+```
+
+Then:
+
+```bash
+python <skill>/scripts/install.py
+```
+
+From `ladder.json`, the script:
+- checks that no credential would move billing off the subscription (see below);
+- checks that the skills in `agent_skills` are installed;
+- writes one agent file per active rung to `~/.claude/agents/` and deletes the file of any inactive rung;
+- writes a `permissions.ask` rule `Agent(<agent>)` to `~/.claude/settings.json` for each rung that needs approval. It only rewrites `Agent(exec-...)` rules and keeps the rest of the file.
+
+Run it again whenever the ladder changes. If `~/.claude/agents/` did not exist when the session started, restart Claude Code so it sees the agents. `route.py` stops with an error if the chosen agent is not installed.
+
+## Subscription only
+
+All work runs through Claude Code on the subscription login (Pro, Max, Team or Enterprise). Subagents count against the same usage limit as the main session; routing steps to cheap rungs is exactly what makes that limit go further. No script in this skill calls the Anthropic API.
+
+There are three ways billing can leave the subscription, and the skill handles each:
+
+1. **API credential in the environment.** `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `apiKeyHelper`, `ANTHROPIC_PROFILE`, `ANTHROPIC_BASE_URL` or a provider such as Bedrock take precedence over the subscription login. In `-p` mode the API key is used without asking. `install.py` and `route.py` stop with an error if they find any of them in the environment or in the user's and project's `settings.json`. This check only sees the environment that reaches the shell; the definitive confirmation is `/status`, which shows the credential in use.
+2. **Fable billing usage credits.** Off by default. To turn it on, open `/model`: if the Fable row does not show "Requires usage credits", it is within your plan's limit. Then set `"active"` to `true` on the four Fable rungs in `ladder.json` and run `install.py` again.
+3. **Usage credits after hitting the limit.** If usage credits are enabled on the account, usage can continue past the limit and be billed. Keeping them off guarantees that work stops at the limit instead of billing. This is an account setting, not a skill setting: https://support.claude.com/en/articles/12429409-extra-usage-for-paid-claude-plans.
+
+## Per-step protocol
+
+1. **Break the task into steps**, each with an objective verification criterion: the test that must pass, the script that must run, the output that must validate.
+
+2. **Decide whether the step is worth delegating.** A subagent starts with an empty context, so delegating has a fixed cost. Reading a file, a grep or a one-line edit you do directly, without routing. Steps that depend on a lot of this conversation's context are only worth delegating if you can pass that context in the prompt. Independent steps go together in a parallel batch: see [Parallel batches](#parallel-batches), which applies these same steps to several at once.
+
+3. **Build the state and run the router:**
+
+   ```bash
+   python <skill>/scripts/route.py '{"description": "fix grid reader for lon 0-360 and 12Z accumulation", "operation": "implementation", "files": 2, "ambiguous": false, "critical": true}'
+   ```
+
+   The output is one JSON line:
+
+   ```json
+   {"id": "3f9a1c2e", "batch": null, "description": "fix grid reader for lon 0-360 and 12Z accumulation", "agent": "exec-sonnet-high", "label": "Sonnet at high effort", "model": "sonnet", "effort": "high", "suited_for": "clear scope where verification matters and edge cases are likely", "reason": "operation=implementation (rung 2); +1 critical", "below": "Sonnet at medium effort: day-to-day work with a clear scope", "needs_approval": false, "alternative": null, "backend": "heuristic"}
+   ```
+
+   The JSON goes inside single quotes in the shell. If the description has an apostrophe, rephrase it without one.
+
+4. **Justify the choice to the user**, always, before delegating. The format is in [Justification](#justification).
+   - If `needs_approval` is `false`, show the justification and proceed.
+   - If it is `true`, **ask and wait for the answer**, as described in [Approval](#approval). Do not delegate before that.
+
+5. **Log the justification** with the user's answer:
+
+   ```bash
+   python <skill>/scripts/justify.py 3f9a1c2e auto 'Sonnet high: ...'
+   ```
+
+   The answer is `auto` for a rung without approval, or `approved`/`declined` for what the user answered. The script rejects `auto` on a rung that needs approval.
+
+6. **Delegate to the chosen agent** with `subagent_type` equal to the `agent` field. **Do not pass the `model` parameter in the call**: it overrides the frontmatter model and defeats the routing. The delegation prompt needs three things, because the subagent does not see this conversation:
+   - the goal of the step;
+   - the context it needs (files, decisions already made, project conventions);
+   - the verification criterion.
+
+   The report format is already in the agent's system prompt.
+
+7. **Check the result yourself.** The subagent's report is a claim, not proof. Apply the step's criterion: run the test, open the file. Only what passes the criterion counts as success.
+
+8. **Record the result** with the decision `id`:
+
+   ```bash
+   python <skill>/scripts/record.py 3f9a1c2e success 48210 37.5
+   ```
+
+   The two trailing numbers (tokens and duration in seconds) come from the subagent's completion notification; leave them out if they are not available. The result is one of:
+   - `success`: passed the criterion;
+   - `failure`: delivered, but wrong or incomplete;
+   - `escalated`: the agent answered `RESULT: ESCALATE`.
+
+   `record.py` rejects the result if there is no logged justification, if the decision needed approval and was not approved, or if it was declined.
+
+9. **On failure or escalation**, run `route.py` again with the same state plus `"failed_with": "<agent that failed>"`.
+   - The decision jumps `escalation_jump` rungs (2 by default). Raising only the effort of the same model rarely fixes what it could not.
+   - Adjust the delegation prompt with what went wrong.
+   - The new decision goes through steps 4 and 5 again. In the justification, say what failed on the previous rung.
+   - After the second escalation of the same step, the problem is usually the step's definition, not the model. Before escalating again, revisit the step: split it or clarify the criterion.
+   - If the router says the step already failed at the ceiling, stop and ask the user: repeating at the top only spends.
+
+## Parallel batches
+
+Independent steps run at the same time, each on its own rung. One batch mixes models and efforts: for example, a Haiku listing a function's call sites, a Sonnet medium writing a new script and a Sonnet high fixing a grid reader, all in parallel.
+
+**What goes in the same batch**
+- Steps that do not depend on each other's results.
+- Steps that do not write to the same files. In a batch, each state declares `targets`: the files or folders the step writes, or `[]` if it only reads. The router rejects the batch if two steps share a target, including a folder that contains the other's file. Parallel agents writing to the same file overwrite each other without warning. For those steps, run them in sequence or pass `isolation: "worktree"` in the Agent call and merge the changes afterwards.
+- At most `max_parallel` steps (8 by default, in `ladder.json`). Every agent in the batch draws on the same subscription usage window at once, and this limit keeps it from being drained in one go. Claude Code has its own cap of 20 concurrent subagents.
+
+**Batch flow**
+
+1. **Run the router once with the list of states:**
+
+   ```bash
+   python <skill>/scripts/route.py '[{"description": "list call sites of calc_eto", "operation": "search", "files": 1, "ambiguous": false, "critical": false, "targets": []}, {"description": "script for an ERA5-Land point series", "operation": "implementation", "files": 1, "ambiguous": false, "critical": false, "targets": ["scripts/era5_point.py"]}]'
+   ```
+
+   The output is a list of decisions, one per step, in the same order, each with its own `id` and all with the same `batch`. If any step is invalid, nothing is logged.
+
+2. **Show the user a table** with step, model and effort, justification, and whether it needs approval. Each row's justification follows [Justification](#justification).
+
+3. **Log the justifications** of the steps that need no approval. The `justify.py` commands can be chained in a single shell call.
+
+4. **Fire the steps that need no approval together**: a single message with several Agent calls, one per step, each with its rung's `subagent_type` and without the `model` parameter. Calls in the same message run at the same time; separate messages would run one after another.
+
+5. **With those already running, ask for approvals** in a single `AskUserQuestion`, one question per step, with the options from [Approval](#approval). The tool takes up to 4 questions per call; beyond that, make more calls. Log the answers and fire the approved steps, also together in a single message. Each one still goes through the native confirmation of the `permissions.ask` rule.
+
+6. **Check and record each step as it finishes**, without waiting for the whole batch. Failed steps can go back together in a new batch, with `failed_with` in each state, as long as they remain independent.
+
+7. **At the end, report a table** with step, model and effort, and result.
+
+## Lean output: caveman and ponytail
+
+Everything this skill produces comes out with the least text and code:
+- **caveman** shortens text: answers, justifications, tables and the subagents' reports. Code, commands, paths and error messages stay exact.
+- **ponytail** shortens code: the least code that works, no speculative abstractions, standard library before dependencies. Validation, error handling and security are never cut.
+
+**In the main session (you):** the ponytail plugin turns itself on through its session-start hook. For either of the two whose rules are not in your context, invoke `caveman` and `ponytail` with the Skill tool before the first step.
+
+**In the subagents:** `install.py` preloads both in each agent's frontmatter (`agent_skills` in `ladder.json`) and stops with an error if either is missing. Without that, the listed skill would be skipped silently. This is where the biggest gain is: a terse report takes less of your context on every step.
+
+**What does not shrink:**
+- the approval question: full justification, cost and options, because it is the user's spending decision;
+- security warnings and confirmations, which caveman itself returns as full sentences;
+- the content of the justification: terse, but it still answers both questions in the next section.
+
+**When code form conflicts,** the project's style rules win (CLAUDE.md and style skills): ponytail decides what exists; the style rules decide how it is written.
+
+**Do not use the caveman proxy** (`caveman claude`). The skill does not need it, and traffic would go through a local address that `route.py` treats as a non-subscription credential (`ANTHROPIC_BASE_URL`).
+
+## Justification
+
+One or two terse sentences per step, starting with the step and the chosen model. It answers two questions:
+
+- **Why this rung:** what, in this concrete step, calls for this model and effort. Cite the step (the file, the edge case, the risk), not just the category.
+- **Why not the rung below:** what the rung below lacks for this step. On rung 0, say why you did not do the step directly. On an escalation, say what failed on the previous rung.
+
+Ground it in the router output fields: `suited_for` of the chosen rung, `below` (the rung below and what it is suited for) and `reason` (the operation and flags that added up, or Laya's probabilities). These texts come from the Claude Code documentation's guidance on each level. **Do not invent model behavior** ("Sonnet would get this wrong"): justify by what the step requires, compared with what each rung is suited for.
+
+Examples:
+
+> **S2 → Sonnet high.** Grid reader: lon 0–360, 12Z accumulation. Edge-case bug leaks silently into maps. Clear scope + edge cases = high. Medium: no such risk.
+
+> **S1 → Haiku.** Banners `# ====` → `#----`, swap with no decisions. Delegated: 2k-line file, diff stays out of this context.
+
+> **S3 → Opus medium (escalation).** Sonnet medium: upsert without natural key, duplicated rows in test. Step needs data-model design = design judgment. Sonnet high: edge cases within an already-designed scope.
+
+## Approval
+
+Rungs 6 to 11 (`exec-opus-xhigh` and up) only run with the user's explicit approval. When `needs_approval` is `true`:
+
+1. **Ask with `AskUserQuestion`.** The question carries the justification and what weighs on the subscription limit: these rungs spend much more of the limit per step, and `max` also has diminishing returns and a tendency to overthink. The options are:
+   - approve the chosen rung (for example, "Approve Opus xhigh");
+   - use the `alternative`, when it is not `null` (the most capable rung below that needs no approval);
+   - do not run this step.
+
+   Do not mark any option as recommended: spending is the user's call.
+
+2. **Depending on the answer:**
+   - **Approved:** log `approved` with `justify.py` and delegate. Claude Code will still show the `permissions.ask` confirmation before starting the subagent; that is the lock that does not depend on you, and the user approves again there.
+   - **Chose the alternative:** log `declined` and run `route.py` with the same state plus `"user_ceiling": "<alternative>"`. The new decision follows the normal protocol.
+   - **Do not run:** log `declined` and treat the step as pending in the final report.
+
+3. **No way to ask** (scheduled session or no `AskUserQuestion`): do not delegate these rungs. Leave the step pending, say which rung it asked for and why, and carry on with the steps that do not depend on it. In `dontAsk` mode, the `permissions.ask` rule makes Claude Code deny the call anyway.
+
+## Filling in the state
+
+| Field | Type | Meaning |
+|---|---|---|
+| `description` | text | The step in one sentence, in English |
+| `operation` | text | One of the categories below |
+| `files` | integer | How many files or artifacts the step reads or changes substantially |
+| `ambiguous` | bool | `true` if the step allows more than one reasonable interpretation or depends on a design decision not yet made |
+| `critical` | bool | `true` if a mistake is costly: production, irreversible data, security, silent numerical error, or output other steps will consume without review |
+| `failed_with` | text, optional | Agent that failed this step (escalation only) |
+| `user_ceiling` | text, optional | Highest agent the user accepted (when they chose the alternative) |
+| `targets` | list, required in a batch | Files or folders the step writes; `[]` if read-only |
+
+| `operation` | Base rung | When to use |
+|---|---|---|
+| `search` | 0 | find definitions and call sites, list files, scan logs |
+| `read` | 0 | summarize a file or traceback, extract values |
+| `mechanical_edit` | 0 | replace, rename, format, convert format, no decisions |
+| `tweak` | 1 | small change following an existing pattern (new argument, new config entry, simple test) |
+| `implementation` | 2 | write a function, script or endpoint with a clear scope |
+| `writing` | 2 | documentation, README, technical text |
+| `data_analysis` | 2 | load, aggregate, compare, plot |
+| `debugging` | 3 | find the cause of an error or a failing test |
+| `review` | 4 | critical review of code or results |
+| `architecture` | 5 | design a structure or contract, choose an approach |
+| `research` | 6 | open problem, algorithm with no reference, model diagnosis |
+| `security` | 6 | security review or vulnerability hunting (ceiling at rung 7) |
+| `investigation` | 9 | unknown root cause spanning several systems |
+| `long_task` | 9 | long cohesive block that loses meaning if split |
+
+The `files > 3`, `ambiguous` and `critical` fields each add one rung.
+
+The `security` operation stops at Opus max. Fable reroutes flagged cybersecurity requests to an earlier model, so climbing past it would not get Fable anyway. With Fable off, `investigation` and `long_task` also stop at Opus max.
+
+**When unsure about the operation or the flags, read `references/examples.md`.** It has 49 software-development cases, one block per rung, all checked against this router.
+
+Fill it in honestly, without inflating it "to be safe". Everything goes to `~/.claude/cc-router/history.jsonl`, the training set for the Laya router. Inflated fields teach the router to overspend, trigger needless approval requests and hide exactly the cases where a cheap rung would do. Underestimating is cheap, because the escalation in step 9 corrects it.
+
+## When routing does not happen
+
+- **`CLAUDE_CODE_EFFORT_LEVEL` set**: it overrides the frontmatter `effort`, and every agent runs at the same effort. Unset it for routing to work.
+- **`CLAUDE_CODE_SUBAGENT_MODEL_FORCE=1`**: Claude Code ignores the agents' `model`.
+- **Model blocked** by `availableModels` or an organization restriction: Claude Code substitutes the model and shows a warning.
+- **Content fallback**: Fable and recent Opus and Sonnet versions reroute flagged cybersecurity or biology requests to another model and stay on it.
+
+To check, run `/tasks` while the subagent runs: its row shows the model and effort in use.
+
+## Model aliases
+
+Each agent's `model` is `haiku`, `sonnet`, `opus` or `fable`, never a version. How Claude Code resolves these names:
+- **New version:** the alias points to it once Claude Code is updated. Nothing changes in the skill.
+- **Same family as the main session:** the subagent runs on the session's exact version. With the session on an Opus pinned via `/model`, the `opus` rungs use that same Opus.
+- **Pinning a version:** to hold a family at a version, set `ANTHROPIC_DEFAULT_OPUS_MODEL` (or `_SONNET_`, `_HAIKU_`, `_FABLE_`) to its ID in the `env` of `settings.json`. The skill keeps using the aliases.
+- **Unsupported effort:** if a new version does not accept a level, Claude Code uses the highest supported level below it.
+- **A family renamed or retired:** then edit `model` in `ladder.json` and run `install.py`.
+
+The side effect lands in the history. When an alias changes version, the same rung starts meaning a different model, and old and new decisions stop being comparable. Every event has a date; when you learn of a version change, note the date to split the periods when training Laya (see `references/laya.md`).
+
+## Switching the heuristic for Laya
+
+The heuristic is the starting phase and builds the history. To move to the trained router, read `references/laya.md`. In short: with a fine-tuned checkpoint served by `scripts/serve_laya.py` (plain `laya-serve` cannot load your own checkpoint), set `"backend"` to `"laya"` in `ladder.json`.
+- If the server is down, `route.py` decides with the heuristic and says so in the output's `backend` field and on stderr.
+- If the server answers with an error, the script stops.
+- The escalation floor, the per-operation ceiling, `user_ceiling` and approval apply to both backends.

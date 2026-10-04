@@ -20,6 +20,16 @@ Claude Code and Codex skill (`cc-router`) that routes delegated steps to a subag
 
 ## Installation
 
+### Python dependencies
+
+For either operator, install the Laya server (PyTorch, Transformers, FastAPI and Uvicorn come with it) in the Python 3.10+ environment you will use for the skill:
+
+```bash
+python3 -m pip install "laya[serve]"
+```
+
+The routing scripts themselves need only the standard library. After installing the skill below, start its services with `scripts/start_services.sh` (see [Use the public Laya checkpoint](#use-the-public-laya-checkpoint)).
+
 ### Codex
 
 ```bash
@@ -79,13 +89,7 @@ Ask the operator to use `cc-router` for a task suited to delegation. The full pr
 
 ## Use the public Laya checkpoint
 
-Install Laya once:
-
-```bash
-python -m pip install "laya[serve]"
-```
-
-Run the minimal SDK example from this repository in another terminal. It asks Laya to choose `low`, `medium` or `high` effort for `gpt-6.1-sol` on a sample task; the first run downloads the checkpoint:
+Install the [Python dependencies](#python-dependencies) first. Run the minimal SDK example from this repository in another terminal. It asks Laya to choose `low`, `medium` or `high` effort for `gpt-6.1-sol` on a sample task; the first run downloads the checkpoint:
 
 ```bash
 python laya-example.py
@@ -93,13 +97,17 @@ python laya-example.py
 
 Pass a different task in English to try it: `python laya-example.py "Debug a failing parser test"`.
 
-For regular `cc-router` routing, start the bundled launcher for the official local server:
+For regular `cc-router` routing, start the local services:
 
 ```bash
-python scripts/serve_laya.py
+scripts/start_services.sh
 ```
 
+The script reads the port from `config/ladder.json`, starts the official Laya server in the background through `scripts/serve_laya.py`, waits until the checkpoint is loaded and prints the PID to stop it. If Laya is already running on that port, it does nothing. The log goes to `~/.local/state/cc-router/laya.log` (or `$XDG_STATE_HOME/cc-router/laya.log`).
+
 The example and server launcher test a small PyTorch operation on available GPUs. They use a working GPU or fall back to CPU, including on an MX350 with a PyTorch build that cannot run `sm_61` kernels. The server listens on `127.0.0.1:8000` and loads only the English checkpoint by default.
+
+Use a port that is free on your machine. If another service already uses the configured port, `start_services.sh` finds the next free port and asks `Use port XXXX?`. A yes saves that port in `laya_url` and both `laya_urls` entries in `config/ladder.json` and starts Laya on it. A no or an empty answer leaves everything unchanged. Without a terminal, pipe the answer: `echo y | scripts/start_services.sh`. Never point the router at another service's port: its error stops routing instead of triggering the heuristic fallback. See the [Laya guide](references/laya.md#choose-an-available-port).
 
 Both operators use `http://127.0.0.1:8000/v1/systemone` by default. `backend` is already set to `laya` in `config/ladder.json`; if the server is unavailable, routing falls back to the heuristic. No training or GPU training job is needed. Laya's zero-shot scores for this model-selection question are unvalidated locally, so continue to verify outcomes. See the [Laya guide](references/laya.md) for setup and interpretation.
 
@@ -127,7 +135,8 @@ Token cost is tracked separately from the outcome because one observed run canno
 | `scripts/feedback.py` | Corrects a no-rework label discovered after recording |
 | `scripts/laya_device.py` | Checks which GPU can run PyTorch, with CPU fallback |
 | `scripts/serve_laya.py` | Starts the official Laya server on the selected device |
-| `references/examples.md` | 49 routing examples for software development |
+| `scripts/start_services.sh` | Starts Laya in the background on the port set in `config/ladder.json` |
+| `references/examples.md` | 320 examples by model and effort, plus 49 routing cases checked against the router |
 | `references/laya.md` | Public Laya checkpoint setup and decision limits |
 
 History lives in `~/.claude/cc-router/history.jsonl` or `~/.codex/cc-router/history.jsonl`, according to the detected operator.

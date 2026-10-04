@@ -4,14 +4,18 @@
 
 ## Start Laya locally
 
-Install the official HTTP server in a Python 3.10+ environment, then run the skill's launcher:
+Install the official HTTP server in a Python 3.10+ environment, then start the skill's services:
 
 ```bash
-python -m pip install "laya[serve]"
-python <skill>/scripts/serve_laya.py
+python3 -m pip install "laya[serve]"
+<skill>/scripts/start_services.sh
 ```
 
-The launcher tests a small PyTorch operation on each available GPU in a separate process. It selects a working GPU or CPU if none can run, then starts the official server on loopback with the English checkpoint. This avoids using the MX350 with a PyTorch build that lacks `sm_61` kernels. The server exposes `http://127.0.0.1:8000/v1/systemone`. One instance serves both operators. Keep it running while routing. See Laya's [HTTP API documentation](https://github.com/NandhaKishorM/laya/blob/main/docs/http-api.md) for preload, port and authentication settings. If you change its port, update both URLs in `config/ladder.json`. If you set `LAYA_API_KEY` on the server, provide the same value to `route.py`.
+`start_services.sh` reads the port from `config/ladder.json` and starts `scripts/serve_laya.py` in the background. It waits until the checkpoint is loaded and prints the PID to stop it. If Laya already answers on that port, it does nothing. The log goes to `~/.local/state/cc-router/laya.log` (or `$XDG_STATE_HOME/cc-router/laya.log`). The launcher tests a small PyTorch operation on each available GPU in a separate process. It selects a working GPU or CPU if none can run, then starts the official server on loopback with the English checkpoint. This avoids using the MX350 with a PyTorch build that lacks `sm_61` kernels. The server exposes `http://127.0.0.1:8000/v1/systemone`. One instance serves both operators. Keep it running while routing. See Laya's [HTTP API documentation](https://github.com/NandhaKishorM/laya/blob/main/docs/http-api.md) for preload and authentication settings. If you set `LAYA_API_KEY` on the server, provide the same value to `route.py`.
+
+### Choose an available port
+
+Port 8000 is only the default. Use a port that is free on the user's machine. Before starting the server, check whether another service already listens on it (for example, `ss -ltn | grep ':8000 '` on Linux or `lsof -iTCP:8000 -sTCP:LISTEN` on macOS). `start_services.sh` checks this for you. If another service holds the configured port, it finds the next free port and asks `Use port XXXX?`. A yes saves that port in `laya_url` and in both `laya_urls` entries in `config/ladder.json`, keeping the file's layout, and starts the server on it. A no or an empty answer changes nothing. Without a terminal, pipe the answer: `echo y | <skill>/scripts/start_services.sh`. You can also set a port by hand in those entries; the script always uses the port in `config/ladder.json`. Do not leave the router pointed at a port that belongs to another service: its HTTP error looks like a response error from a running server and stops routing instead of falling back to the heuristic.
 
 The default `backend` is `laya` and `laya_enabled_operators` contains both `claude` and `codex`. If the server is unavailable, `route.py` reports the outage and uses the heuristic. A response error from a running server stops routing so a broken request is visible. You can explicitly use `"backend": "heuristic"` in `config/ladder.json`.
 

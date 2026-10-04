@@ -43,7 +43,14 @@ In the commands below, `<skill>` is this skill's base directory, shown when it l
 
 In Codex, install this folder as a Codex skill (for example, under `~/.codex/skills/cc-router`) and invoke it in a session with native subagent tools. Install caveman's Codex skill and ponytail's Codex plugin using the commands in [README.md](README.md#codex). Ponytail's hooks require `node` on the shell's PATH; review and trust them under `/hooks`, then start a new thread. No generated agent files or Claude Code settings are needed. `install.py` detects Codex and exits without changing Claude Code files.
 
-For either operator, start the public Laya checkpoint as described in [references/laya.md](references/laya.md). The router uses it by default and falls back to the heuristic while the local server is unavailable.
+For either operator, install the Python dependencies and start the local services:
+
+```bash
+python3 -m pip install "laya[serve]"
+<skill>/scripts/start_services.sh
+```
+
+The script starts the public Laya checkpoint in the background on the port set in `config/ladder.json` (8000 by default). If another service already uses that port, it finds the next free port and asks `Use port XXXX?`. Without a terminal, the answer is read from stdin and an empty answer means no. Relay the question to the user, and only after the user agrees, run `echo y | <skill>/scripts/start_services.sh`. A yes saves the new port in `laya_url` and `laya_urls`, so `route.py` follows it. See [references/laya.md](references/laya.md). The router uses Laya by default and falls back to the heuristic while the local server is unavailable.
 
 In Claude Code, install the following plugins, one command per message:
 
@@ -269,7 +276,7 @@ The `files > 3`, `ambiguous` and `critical` fields each add one rung.
 
 Base rungs above the active ladder are capped at its last rung. On the Claude ladder, `security` stops at Opus max; Fable reroutes flagged cybersecurity requests to an earlier model. On the Codex ladder, `security`, `investigation` and `long_task` cap at Astra max.
 
-**When unsure about the operation or the flags, read `references/examples.md`.** It has 49 software-development cases, one block per rung, all checked against this router.
+**When unsure about the operation or the flags, read the last section of `references/examples.md`** ("Classifying operation and flags for route.py"). It has 49 software-development cases, one block per rung, all checked against this router. The rest of the file lists 320 examples of what each model and effort level suits; use it to judge a decision or an escalation, not to fill the state.
 
 Fill it in honestly, without inflating it "to be safe". History goes to `~/.claude/cc-router/history.jsonl` or `~/.codex/cc-router/history.jsonl`, according to the operator. Both ladders use the same public Laya checkpoint. When `backend: laya` is selected but the operator is absent from `laya_enabled_operators`, routing stays heuristic and reports that fallback in `backend`.
 

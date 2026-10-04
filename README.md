@@ -1,5 +1,7 @@
 # cc-router
 
+![cc-router](cc-router.png)
+
 Claude Code and Codex skill (`cc-router`) that routes delegated steps to a subagent with a model and effort suited to the step.
 
 - **Operator-aware ladders:** Claude Code uses Haiku → Sonnet → Opus → Fable; Codex uses Luna → Sol → Astra. The router detects the active operator or accepts `CC_ROUTER_OPERATOR=claude|codex`.

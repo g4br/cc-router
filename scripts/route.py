@@ -4,7 +4,7 @@ import json
 import uuid
 from pathlib import Path
 from statistics import median
-from urllib.request import Request, urlopen
+from urllib.request import Request, build_opener, HTTPRedirectHandler, ProxyHandler
 from urllib.error import URLError, HTTPError
 
 from common import load_config, log_event, check_subscription, detect_operator, history_path, laya_state, last_active_rung, skill_dir, agents_dir
@@ -12,13 +12,7 @@ from common import load_config, log_event, check_subscription, detect_operator, 
 #-----------------------------------------------------------
 # Functions
 #-----------------------------------------------------------
-def check_state(state, config):
-    required = ['description', 'operation', 'files', 'ambiguous', 'critical']
-    missing = [field for field in required if field not in state]
-    if missing: raise ValueError(f'State missing fields {missing}. Required: {required}. Step: {state.get("description")}')
-    if state['operation'] not in config['base_level_by_operation']: raise ValueError(f"Invalid operation '{state['operation']}'. Accepted: {list(config['base_level_by_operation'])}")
-    if 'user_language' in state and (not isinstance(state['user_language'], str) or not state['user_language'].strip()):
-        raise ValueError('user_language must be a nonempty language name or code')
+from state import check_state
 
 def overlaps(target_a, target_b):
     # same file, or one is a folder that contains the other
@@ -26,18 +20,11 @@ def overlaps(target_a, target_b):
     return a == b or a in b.parents or b in a.parents
 
 def check_batch(states, config):
-    # parallel agents writing to the same file overwrite each other without warning
-    if len(states) > config['max_parallel']: raise ValueError(f"Batch with {len(states)} steps; the maximum is {config['max_parallel']} (max_parallel in ladder.json). Split it.")
-    no_targets = [s['description'] for s in states if 'targets' not in s]
-    if no_targets: raise ValueError(f'In a batch, every step declares "targets" (files or folders it writes; [] if read-only). Missing in: {no_targets}')
-    for i, state_a in enumerate(states):
-        for state_b in states[i + 1:]:
-            shared = [(a, b) for a in state_a['targets'] for b in state_b['targets'] if overlaps(a, b)]
-            if shared: raise ValueError(f"Steps with shared targets cannot share a batch: '{state_a['description']}' and '{state_b['description']}' on {shared}. Run them in sequence or isolate with a worktree.")
+    from planning import plan
+    return plan(states, config)
 
 def limits(state, config, names):
-    # ceiling: the last active rung (Fable stays off while it bills usage credits), and
-    # security never climbs to Fable, which reroutes flagged cybersecurity requests to another model
+    # Compatibility helper for legacy consumers; native v2 uses eligibility gates.
     ceiling = min(config['ceiling_by_operation'].get(state['operation'], len(names) - 1), last_active_rung(config['ladder']))
     #
     # user_ceiling: the user declined a costly rung and chose the cheaper alternative
@@ -46,15 +33,18 @@ def limits(state, config, names):
         if user_ceiling not in names: raise ValueError(f"user_ceiling '{user_ceiling}' is not on the ladder: {names}")
         ceiling = min(ceiling, names.index(user_ceiling))
     #
-    # after a failure the step jumps escalation_jump rungs, because raising only the effort
-    # of the same model rarely fixes what it could not
+    # The old fixed jump remains available only in this legacy helper.
     floor = 0
+    user_floor = state.get('user_floor')
+    if user_floor:
+        if user_floor not in names: raise ValueError(f"user_floor '{user_floor}' is not on the ladder: {names}")
+        floor = min(names.index(user_floor), ceiling)
     failed_with = state.get('failed_with')
     if failed_with:
         if failed_with not in names: raise ValueError(f"failed_with '{failed_with}' is not on the ladder: {names}")
         failed_level = names.index(failed_with)
         if failed_level >= ceiling: raise ValueError(f"Step '{state['description']}' already failed at the ceiling ({names[ceiling]}). Stop and ask the user instead of repeating it.")
-        floor = min(failed_level + config['escalation_jump'], ceiling)
+        floor = max(floor, min(failed_level + config['escalation_jump'], ceiling))
     return floor, ceiling
 
 def heuristic_level(state, config):
@@ -71,6 +61,11 @@ def heuristic_level(state, config):
         level += 1
         reasons.append('+1 critical')
     return level, reasons
+
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise ValueError("laya response: redirects are not permitted")
+
 
 def laya_probabilities(state, config):
     # one binary question per rung, with neutral keys: Laya's noul type
@@ -90,24 +85,38 @@ def laya_probabilities(state, config):
     if os.environ.get('LAYA_API_KEY'):
         headers['Authorization'] = f"Bearer {os.environ['LAYA_API_KEY']}"
     request = Request(config['laya_url'], data=body, headers=headers)
-    with urlopen(request, timeout=config['laya_timeout_s']) as response:
-        answers = json.load(response)['answers']
-    return {name: answers[name]['probabilities']['A'] for name in questions}
+    try:
+        with build_opener(ProxyHandler({}), NoRedirect()).open(request, timeout=config['laya_timeout_s']) as response:
+            answers = json.load(response)['answers']
+        values = {name: answers[name]['probabilities']['A'] for name in questions}
+        from candidates import number
+        for value in values.values():
+            number(value, 'laya score', 0, 1)
+        return values
+    except (KeyError, TypeError, ValueError):
+        raise ValueError('laya response: invalid score contract') from None
 
-def first_above_threshold(probabilities, names, floor, ceiling, threshold):
+def first_above_threshold(probabilities, ladder, floor, ceiling, threshold):
     for i in range(floor, ceiling + 1):
-        if probabilities[names[i]] >= threshold:
+        if i > floor and ladder[i].get('escalation_only'):
+            continue
+        if probabilities[ladder[i]['agent']] >= threshold:
             return i
-    # no configuration is reliable enough: take the most capable one allowed
-    return ceiling
+    # no reachable rung is reliable enough: Laya has no opinion, so the heuristic decides
+    return None
+
+def below_escalation_only(level, floor, ladder):
+    # max-effort rungs cost several times the rung below for a marginal gain: reached only by a floor
+    while level > floor and ladder[level].get('escalation_only'):
+        level -= 1
+    return level
 
 def observed_token_costs(operator, operation, min_samples):
     history = history_path(operator)
     if not history.exists():
         return {}
     decisions, samples = {}, {}
-    for line in history.read_text(encoding='utf-8').splitlines():
-        event = json.loads(line)
+    for event in read_history(history):
         if event.get('event') == 'decision':
             decisions[event['id']] = event
         elif event.get('event') == 'result':
@@ -116,7 +125,7 @@ def observed_token_costs(operator, operation, min_samples):
             if (decision and decision.get('backend', '').startswith(('heuristic', 'laya'))
                     and decision['state']['operation'] == operation
                     and not decision['state'].get('failed_with')
-                    and isinstance(tokens, int) and tokens > 0):
+                    and event.get('result') == 'success' and type(tokens) is int and tokens > 0):
                 samples.setdefault(decision['agent'], []).append(tokens)
     return {name: median(values) for name, values in samples.items() if len(values) >= min_samples}
 
@@ -124,10 +133,13 @@ def choose_level(state, config, names, floor, ceiling):
     level, reasons = heuristic_level(state, config)
     if floor > level:
         level = floor
-        reasons.append(f"floor {floor} after failing with {state['failed_with']}")
+        reasons.append(f"floor {floor} after failing with {state['failed_with']}" if state.get('failed_with') else f"floor {floor} from user_floor")
     if level > ceiling:
         level = ceiling
         reasons.append(f'capped at {names[ceiling]}')
+    if below_escalation_only(level, floor, config['ladder']) != level:
+        level = below_escalation_only(level, floor, config['ladder'])
+        reasons.append(f'{names[level + 1]} only by escalation')
     if config['backend'] == 'heuristic':
         return level, reasons, config.get('backend_label', 'heuristic'), None
     #
@@ -140,21 +152,25 @@ def choose_level(state, config, names, floor, ceiling):
         print(f'Laya unavailable at {config["laya_url"]} ({error}); deciding with the heuristic', file=sys.stderr)
         return level, reasons, 'heuristic (laya unavailable)', None
     #
-    level = first_above_threshold(probabilities, names, floor, ceiling, config['success_threshold'])
+    level = first_above_threshold(probabilities, config['ladder'], floor, ceiling, config['success_threshold'])
+    if level is None:
+        level, reasons, _, _ = choose_level(state, dict(config, backend='heuristic'), names, floor, ceiling)
+        reasons.append(f"no reachable rung at uncalibrated score>={config['success_threshold']}; heuristic decides")
+        return level, reasons, 'laya (no opinion)', probabilities
     eligible = [i for i in range(floor, ceiling + 1)
-                if probabilities[names[i]] >= config['success_threshold']]
+                if probabilities[names[i]] >= config['success_threshold'] and (i == floor or not config['ladder'][i].get('escalation_only'))]
     costs = observed_token_costs(config['operator'], state['operation'], config['min_cost_samples'])
     cost_reason = None
     if eligible and all(names[i] in costs for i in eligible):
-        level = min(eligible, key=lambda i: (costs[names[i]] / probabilities[names[i]], i))
-        cost_reason = f'estimated tokens per first-pass success={costs[names[level]] / probabilities[names[level]]:.0f}'
-    reasons = [f"P(success)={probabilities[names[level]]:.3f}, threshold {config['success_threshold']}, floor {floor}, ceiling {ceiling}"]
+        level = min(eligible, key=lambda i: (costs[names[i]], i))
+        cost_reason = f'legacy observed successful-attempt tokens={costs[names[level]]:.0f}'
+    reasons = [f"uncalibrated score={probabilities[names[level]]:.3f}, threshold {config['success_threshold']}, floor {floor}, ceiling {ceiling}"]
     if cost_reason:
         reasons.append(cost_reason)
     elif eligible:
         reasons.append(f'token estimates incomplete (<{config["min_cost_samples"]} samples per eligible rung); using ladder order')
     if level > 0:
-        reasons.append(f"rung below at P(success)={probabilities[names[level - 1]]:.3f}")
+        reasons.append(f"rung below at uncalibrated score={probabilities[names[level - 1]]:.3f}")
     return level, reasons, 'laya', probabilities
 
 def alternative_without_approval(ladder, floor, level):
@@ -164,83 +180,176 @@ def alternative_without_approval(ladder, floor, level):
             return ladder[i]['agent']
     return None
 
-#-----------------------------------------------------------
-# Input and paths
-#-----------------------------------------------------------
-if len(sys.argv) != 2: raise ValueError("usage: python route.py '<state JSON>' or '[<state>, <state>, ...]' for a parallel batch")
+from common import read_history
+from failures import diagnose
+from selection import eligible_candidates, select, needs_approval
+from telemetry import profile, estimates
 
-# Claude Code can switch from subscription billing when an API credential is set.
-operator = detect_operator()
-if operator == 'claude':
-    check_subscription()
 
-payload  = json.loads(sys.argv[1])
-is_batch = isinstance(payload, list)
-states   = payload if is_batch else [payload]
-config   = load_config(operator)
-ladder   = config['ladder']
-names    = [rung['agent'] for rung in ladder]
+def route_one(state, config, events, batch_id=None):
+    diagnosis = diagnose(state, config)
+    eligible, excluded = eligible_candidates(state, config, diagnosis)
+    decision_id, attempt_id = uuid.uuid4().hex, uuid.uuid4().hex
+    task_id = state.get('task_id', uuid.uuid4().hex)
+    common = {'schema_version': 2, 'id': decision_id, 'decision_id': decision_id,
+              'task_id': task_id, 'attempt_id': attempt_id, 'batch': batch_id,
+              'host': config['operator'], 'operator': config['operator'],
+              'description': state['description'], 'user_language': state.get('user_language'),
+              'eligible': [c['id'] for c in eligible], 'excluded': excluded,
+              'failure': diagnosis, 'task_profile': profile(state, config['file_limit']),
+              'policy': state.get('policy', config['policy']),
+              'attempt_count': state.get('attempt_count', 1 if state.get('failed_with') else 0) + 1,
+              'constraints': {k: state[k] for k in ('user_ceiling', 'user_floor', 'blocked_candidates',
+                              'allowed_candidates', 'required_capabilities') if k in state}}
+    if diagnosis['kind'] and not diagnosis['retry_allowed']:
+        common.update(selected=None, agent=None, model=None, effort=None, label=None, suited_for=None,
+                      needs_approval=diagnosis['action'] in ('request_authorization', 'approve_non_idempotent_retry'),
+                      alternative=None, below=None, backend='heuristic', confidence='unknown',
+                      reason=diagnosis['action'], execution={'status': 'blocked', 'applied': False},
+                      uncertainty='failure must be resolved before retry')
+        return common
+    if not eligible:
+        raise ValueError('candidates: no eligible native candidate under current constraints')
+    baseline, reasons = heuristic_level(state, config)
+    backend, scores = config['backend'], None
+    if backend == 'laya' and config['operator'] not in config['laya_enabled_operators']:
+        backend = 'heuristic (host Laya disabled)'
+    if backend == 'laya':
+        try:
+            by_agent = laya_probabilities(state, dict(config, ladder=eligible))
+            scores = {c['id']: by_agent[c['agent']] for c in eligible}
+        except HTTPError:
+            raise ValueError('laya response: HTTP error; check local service contract') from None
+        except (URLError, TimeoutError, ConnectionError):
+            backend = 'heuristic (laya unavailable)'
+            print('Laya unavailable; deciding with the heuristic', file=sys.stderr)
+    evidence = estimates(events, state, eligible, config, scores)
+    chosen, selection_reasons, confidence, objectives = select(state, config, eligible, evidence, baseline, scores)
+    if state.get('policy', config['policy']) == 'legacy':
+        if scores:
+            above = [c for c in eligible if scores[c['id']] >= config['success_threshold']]
+            if above:
+                chosen = min(above, key=lambda c: c['legacy_rank'])
+        selection_reasons = ['legacy operation/flags and first score above transitional threshold; current safety gates apply']
+    if scores and not any(s >= config['success_threshold'] for s in scores.values()):
+        backend = 'laya (no opinion)'
+    if config['operator'] == 'claude' and not (agents_dir / f"{chosen['agent']}.md").exists():
+        raise FileNotFoundError('Agent is not installed. Run scripts/install.py for Claude Code')
+    alternatives = [c for c in eligible if c['id'] != chosen['id']]
+    nearest = min(alternatives, key=lambda c: abs(c['legacy_rank']-chosen['legacy_rank']), default=None)
+    safe = [c for c in alternatives if not needs_approval(c) and c['consumption_tier'] <= chosen['consumption_tier']]
+    alternative = min(safe, key=lambda c: abs(c['legacy_rank']-chosen['legacy_rank']), default=None)
+    limitations = ['native host must confirm effective model and effort', config['host_config']['capability_source']]
+    if config['operator'] == 'claude' and any(os.environ.get(k) for k in ('CLAUDE_CODE_EFFORT_LEVEL', 'CLAUDE_CODE_SUBAGENT_MODEL_FORCE')):
+        limitations.append('host environment may override selected settings')
+    common.update(selected=chosen['id'], agent=chosen['agent'], model=chosen['model'], effort=chosen['effort'],
+                  label=chosen['label'], suited_for=chosen['suited_for'],
+                  needs_approval=needs_approval(chosen), alternative=alternative['agent'] if alternative else None,
+                  nearest_alternative=nearest['id'] if nearest else None,
+                  below=f"{nearest['label']}: {nearest['suited_for']}" if nearest else None,
+                  backend=backend, confidence=confidence, uncertainty='observational estimates; untried outcomes unknown',
+                  reason='; '.join(reasons + selection_reasons), evidence=evidence, objectives=objectives,
+                  scores=scores, score_kind='uncalibrated' if scores else None,
+                  billing_mode=chosen['billing_mode'],
+                  execution={'mode': 'native', 'status': 'requires_host_confirmation', 'applied': False,
+                             'effective_candidate': None, 'resolved_model': None, 'effective_effort': None,
+                             'limitations': limitations})
+    return common
 
-if config['backend'] not in ('heuristic', 'laya'): raise ValueError(f"Invalid backend '{config['backend']}' in ladder.json. Accepted: heuristic, laya")
-if config['backend'] == 'laya' and operator not in config['laya_enabled_operators']:
-    config['backend'] = 'heuristic'
-    config['backend_label'] = f'heuristic (no enabled {operator} Laya checkpoint)'
-#-----------------------------------------------------------
-# Check every step before deciding any
-#-----------------------------------------------------------
-# a batch is only logged if every step passes, so no orphan decision is left behind
-for state in states:
+
+def link_task(state, events, config):
+    if not state.get('task_id'):
+        return
+    prior = [e for e in events if e.get('event') == 'decision' and e.get('task_id') == state['task_id']]
+    if not prior:
+        return
+    previous = prior[-1]
+    results = [e for e in events if e.get('event') == 'result' and e['id'] in {p['id'] for p in prior}]
+    if any(e.get('result') == 'success' and e.get('task_complete', True) for e in results):
+        raise ValueError('task_id: already completed; use a new task ID')
+    if previous['task_profile'] != profile(state, config['file_limit']):
+        raise ValueError('task_id: task profile changed; create a new task')
+    answers = [e.get('answer') for e in events if e.get('event') == 'justification' and e['id'] == previous['id']]
+    if 'declined' in answers:
+        if not state.get('user_ceiling') and not state.get('allowed_candidates'):
+            raise ValueError('user_ceiling: required after a declined decision')
+        blocked = state.setdefault('blocked_candidates', [])
+        if previous['selected'] not in blocked:
+            blocked.append(previous['selected'])
+    elif previous.get('selected') and not any(r['id'] == previous['id'] for r in results):
+        raise ValueError('task_id: previous attempt has no result; record it before retrying')
+    if results:
+        latest = results[-1]
+        decision = next(p for p in prior if p['id'] == latest['id'])
+        state.setdefault('failed_with', decision['selected'])
+        state.setdefault('failure_kind', latest.get('failure_kind') or 'unknown')
+        if state.get('attempt_count', len(results)) != len(results):
+            raise ValueError('attempt_count: disagrees with task history')
+        state['attempt_count'] = len(results)
     check_state(state, config)
-if is_batch:
-    check_batch(states, config)
 
-limits_per_step = [limits(state, config, names) for state in states]
-#-----------------------------------------------------------
-# Decide each step
-#-----------------------------------------------------------
-batch_id  = uuid.uuid4().hex[:8] if is_batch else None
-records   = []
-decisions = []
-for state, (floor, ceiling) in zip(states, limits_per_step):
-    level, reasons, backend, probabilities = choose_level(state, config, names, floor, ceiling)
-    rung = ladder[level]
-    if operator == 'claude' and not (agents_dir / f"{rung['agent']}.md").exists(): raise FileNotFoundError(f"Agent {rung['agent']} is not installed. Run: python {skill_dir / 'scripts' / 'install.py'}")
-    #
-    decision_id = uuid.uuid4().hex[:8]
-    records.append({
-        'event':          'decision',
-        'operator':       operator,
-        'id':             decision_id,
-        'batch':          batch_id,
-        'state':          state,
-        'agent':          rung['agent'],
-        'level':          level,
-        'needs_approval': rung['approval'],
-        'backend':        backend,
-        'probabilities':  probabilities,
-    })
-    # the orchestrator uses label, suited_for, reason and below to write the justification
-    decisions.append({
-        'id':             decision_id,
-        'batch':          batch_id,
-        'description':    state['description'],
-        'user_language':  state.get('user_language'),
-        'operator':       operator,
-        'agent':          rung['agent'],
-        'label':          rung['label'],
-        'model':          rung['model'],
-        'effort':         rung['effort'],
-        'suited_for':     rung['suited_for'],
-        'reason':         '; '.join(reasons),
-        'below':          f"{ladder[level - 1]['label']}: {ladder[level - 1]['suited_for']}" if level > 0 else None,
-        'needs_approval': rung['approval'],
-        'alternative':    alternative_without_approval(ladder, floor, level) if rung['approval'] else None,
-        'backend':        backend,
-    })
-#-----------------------------------------------------------
-# Log and return
-#-----------------------------------------------------------
-for record in records:
-    log_event(record)
 
-print(json.dumps(decisions if is_batch else decisions[0], ensure_ascii=False))
+def decision_record(state, decision):
+    record = {k: v for k, v in decision.items() if k not in ('description', 'user_language')}
+    record.update(event='decision', state={k: state[k] for k in
+                  ('operation', 'files', 'ambiguous', 'critical', 'failed_with', 'context_class') if k in state})
+    return record
+
+
+def compact(decision):
+    keys = ('id', 'task_id', 'selected', 'agent', 'model', 'effort', 'needs_approval',
+            'alternative', 'failure', 'execution', 'scheduling')
+    result = {key: decision[key] for key in keys if key in decision}
+    result['execution'] = {key: decision['execution'][key] for key in ('mode', 'status', 'applied')
+                           if key in decision['execution']}
+    if decision['needs_approval'] or decision['execution']['status'] == 'blocked':
+        result.update(reason=decision['reason'], nearest_alternative=decision.get('nearest_alternative'),
+                      billing_mode=decision.get('billing_mode'))
+    return result
+
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description='Classify a task; use scheduler.py for a live DAG')
+    parser.add_argument('state', nargs='?')
+    parser.add_argument('--state-file', type=Path)
+    parser.add_argument('--compact', action='store_true')
+    args = parser.parse_args()
+    if (args.state is None) == (args.state_file is None):
+        parser.error('provide state JSON or --state-file')
+    operator = detect_operator()
+    if operator == 'claude':
+        check_subscription()
+    try:
+        payload = json.loads(args.state_file.read_text() if args.state_file else args.state)
+    except json.JSONDecodeError:
+        raise ValueError('state: invalid JSON') from None
+    is_batch = type(payload) is list
+    states = payload if is_batch else [payload]
+    if not states:
+        raise ValueError('batch: must not be empty')
+    config = load_config(operator)
+    for state in states:
+        check_state(state, config)
+    schedule = check_batch(states, config) if is_batch else None
+    events = read_history(history_path(operator))
+    batch_id = uuid.uuid4().hex if is_batch else None
+    for state in states:
+        link_task(state, events, config)
+    decisions = [route_one(state, config, events, batch_id) for state in states]
+    if schedule:
+        for decision, step in zip(decisions, schedule):
+            decision['scheduling'] = step
+    # All decisions and checks finish before the first history mutation.
+    for state, decision in zip(states, decisions):
+        log_event(decision_record(state, decision))
+    output = [compact(d) for d in decisions] if args.compact else decisions
+    print(json.dumps(output if is_batch else output[0], ensure_ascii=False, allow_nan=False))
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except (ValueError, RuntimeError, OSError) as error:
+        print(f'cc-router: {error}', file=sys.stderr)
+        sys.exit(1)

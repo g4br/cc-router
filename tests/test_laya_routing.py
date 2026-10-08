@@ -32,7 +32,7 @@ class LayaHandler(BaseHTTPRequestHandler):
 
 
 class LayaRoutingTest(unittest.TestCase):
-    def test_eligible_rung_uses_observed_tokens_when_coverage_is_complete(self):
+    def test_unknown_legacy_outcomes_do_not_drive_completion_estimates(self):
         server = HTTPServer(('127.0.0.1', 0), LayaHandler)
         thread = threading.Thread(target=server.serve_forever, daemon=True)
         thread.start()
@@ -40,7 +40,7 @@ class LayaRoutingTest(unittest.TestCase):
             with tempfile.TemporaryDirectory() as directory:
                 home = Path(directory)
                 config = json.loads((ROOT / 'config/ladder.json').read_text())
-                self.assertEqual(config['backend'], 'laya')
+                config['backend'] = 'laya'
                 self.assertEqual(set(config['laya_enabled_operators']), {'claude', 'codex'})
                 config['min_cost_samples'] = 2
                 config['laya_urls']['codex'] = f'http://127.0.0.1:{server.server_port}/v1/systemone'
@@ -67,9 +67,10 @@ class LayaRoutingTest(unittest.TestCase):
                                         cwd=ROOT, env=env, text=True, capture_output=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 decision = json.loads(result.stdout)
-                self.assertEqual(decision['agent'], 'exec-sol-high')
+                self.assertEqual(decision['agent'], 'exec-sol-medium')
                 self.assertEqual(decision['user_language'], 'pt-BR')
-                self.assertIn('estimated tokens', decision['reason'])
+                self.assertIn('insufficient comparable completion evidence', decision['reason'])
+                self.assertEqual(decision['score_kind'], 'uncalibrated')
                 self.assertNotIn('failed_with', LayaHandler.received['state'])
                 self.assertNotIn('user_language', LayaHandler.received['state'])
                 self.assertEqual(LayaHandler.received['state']['description'], 'new task')

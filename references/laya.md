@@ -1,36 +1,63 @@
-# Using the public Laya checkpoint
+# Optional local Laya backend
 
-`cc-router` uses the ready-made English checkpoint [`convaiinnovations/laya`](https://huggingface.co/convaiinnovations/laya) for both Claude Code and Codex. There is no export or training step. Before routing, the operator translates the user's task summary into English in `description`; Laya chooses a model and effort from that state. The operator keeps `user_language` for the subagent's report and the final answer, and this field is not sent to Laya. The server downloads the checkpoint when it loads the model and keeps it available for later requests.
+The shipped default is the heuristic backend; `install.py` installs Laya,
+downloads the public English checkpoint and switches `backend` to `laya`.
+Routing never starts it during a unit test or ordinary decision: the skill runs
+`start_services.sh --check` on invocation and asks the user before starting. The operator supplies a faithful English summary
+and keeps the user's language for reports.
 
-## Start Laya locally
-
-Install the official HTTP server in a Python 3.10+ environment, then start the skill's services:
+## Installation and startup
 
 ```bash
 python3 -m pip install "laya[serve]"
-<skill>/scripts/start_services.sh
+scripts/start_services.sh
 ```
 
-`start_services.sh` reads the port from `config/ladder.json` and starts `scripts/serve_laya.py` in the background. It waits until the checkpoint is loaded and prints the PID to stop it. If Laya already answers on that port, it does nothing. The log goes to `~/.local/state/cc-router/laya.log` (or `$XDG_STATE_HOME/cc-router/laya.log`). The launcher tests a small PyTorch operation on each available GPU in a separate process. It selects a working GPU or CPU if none can run, then starts the official server on loopback with the English checkpoint. This avoids using the MX350 with a PyTorch build that lacks `sm_61` kernels. The server exposes `http://127.0.0.1:8000/v1/systemone`. One instance serves both operators. Keep it running while routing. See Laya's [HTTP API documentation](https://github.com/NandhaKishorM/laya/blob/main/docs/http-api.md) for preload and authentication settings. If you set `LAYA_API_KEY` on the server, provide the same value to `route.py`.
+Startup may download the public checkpoint and requires user-authorized network
+access. It probes available GPUs in a separate process and falls back to CPU.
+The existing launcher, `serve_laya.py` and `laya_device.py` are retained. Routing
+itself depends only on Python standard library.
 
-### Choose an available port
+The launcher uses `CC_ROUTER_CONFIG`, then `config/router.json` if present, then
+`config/ladder.json`. Use the configured local port (the bundled file currently
+uses 8001). If occupied by another service, it asks before changing ports; a yes
+backs up the configuration and updates `laya_url`/`laya_urls`. An empty answer
+changes nothing. The log remains under `${XDG_STATE_HOME:-~/.local/state}/cc-router`.
 
-Port 8000 is only the default. Use a port that is free on the user's machine. Before starting the server, check whether another service already listens on it (for example, `ss -ltn | grep ':8000 '` on Linux or `lsof -iTCP:8000 -sTCP:LISTEN` on macOS). `start_services.sh` checks this for you. If another service holds the configured port, it finds the next free port and asks `Use port XXXX?`. A yes saves that port in `laya_url` and in both `laya_urls` entries in `config/ladder.json`, keeping the file's layout, and starts the server on it. A no or an empty answer changes nothing. Without a terminal, pipe the answer: `echo y | <skill>/scripts/start_services.sh`. You can also set a port by hand in those entries; the script always uses the port in `config/ladder.json`. Do not leave the router pointed at a port that belongs to another service: its HTTP error looks like a response error from a running server and stops routing instead of falling back to the heuristic.
+Set `backend` to `laya` and include the intended hosts in
+`laya_enabled_operators`. One local instance can serve both. The optional
+`LAYA_API_KEY` authenticates this local service only; it is not a provider billing
+credential. The selector accepts only loopback HTTP URLs, disables proxy use and
+rejects redirects. It does not contact model-provider APIs.
 
-The default `backend` is `laya` and `laya_enabled_operators` contains both `claude` and `codex`. If the server is unavailable, `route.py` reports the outage and uses the heuristic. A response error from a running server stops routing so a broken request is visible. You can explicitly use `"backend": "heuristic"` in `config/ladder.json`.
+## Scores and observational calibration
 
-## What the decision means
+The request contains only description, operation, files, ambiguity and criticality.
+It excludes user language, execution controls, targets, credentials and history.
+Questions are generated from **eligible** candidate profiles. Only the explicit
+local authentication header, if configured, carries the Laya credential.
 
-For each eligible rung, the router asks Laya whether the rung's model profile suits the task and is likely to complete it on the first attempt without rework. It considers the escalation floor, operation ceiling, user ceiling and approval rules. The first rung with score at least `success_threshold` (default 0.8) is selected; if none clears it, the ceiling is selected. These are **zero-shot estimates** for this project's question. The public checkpoint has not been validated against this project's task outcomes, so the threshold must not be described as a measured 80% success guarantee.
+The returned number is an **uncalibrated score**, not a guaranteed probability of
+success. `success_threshold` remains a transitional heuristic. If no eligible
+candidate clears it, use the conservative heuristic and report `laya (no opinion)`.
+An unavailable service reports `heuristic (laya unavailable)`; malformed JSON,
+missing/invalid scores and HTTP contract errors stop visibly. They never masquerade
+as successful fallback.
 
-When every eligible rung has at least `min_cost_samples` (default 20) observed token counts for the operation, the router compares median tokens divided by the Laya score and selects the lowest value among rungs above the threshold. With incomplete coverage, it uses ladder order. Observations come from completed routed steps, including heuristic fallback and Laya decisions. This comparison is descriptive: a run on one rung does not establish the cost or outcome of another rung for the same task.
+Observed calibration partitions scores into ten bins, separately by task profile,
+host, effective candidate, resolved version and effort. At least
+`min_calibration_samples` (default 20) labelled outcomes in the current bin are
+required. The event's `no_rework` label, including later feedback, determines
+first-pass success. Calibration reports a Laplace-smoothed estimate and Wilson
+95% interval. With enough data, selection uses the calibrated lower bound for its
+reliability constraint; otherwise it retains the labelled heuristic score and
+conservative fallback. Sparse observations never become a numeric success guarantee.
 
-After verifying a step, record its result and any token count reported by the host:
+Completion resources are estimated independently from verified history. No tokens
+are divided by an uncalibrated score. The [v2 reference](router-v2.md) documents
+sample sufficiency, version separation, sources/units and policy weights. Unknown
+versions and incomplete metrics cannot drive empirical selection.
 
-```bash
-python <skill>/scripts/record.py <id> success 48210 37.5 --no-rework true
-```
-
-`--no-rework true` means the criterion passed on the first attempt without correction or retry. Use `false` if the final result needed rework. If you learn later that a label was wrong, use `python <skill>/scripts/feedback.py <id> false` (or `true` for a verified first-pass success). The history is stored separately for Claude Code and Codex under `~/.claude/cc-router/history.jsonl` and `~/.codex/cc-router/history.jsonl`.
-
-Model aliases may resolve to new versions over time. Compare outcomes by date when that happens. Adjusting `laya_question`, rung labels or the threshold changes what Laya is asked; check actual outcomes before relying on the new scores. The official [model card](https://huggingface.co/convaiinnovations/laya) describes the checkpoint's general abilities and limits.
+The public checkpoint is not trained or fine-tuned by this project. Outcomes of
+selected candidates do not establish how untried alternatives would have performed.
+Tests use a small local mock HTTP server and do not load the checkpoint.

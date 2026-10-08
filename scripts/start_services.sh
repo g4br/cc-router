@@ -4,7 +4,9 @@
 set -euo pipefail
 
 skill_dir=$(cd "$(dirname "$0")/.." && pwd)
-config=${CC_ROUTER_CONFIG:-$skill_dir/config/ladder.json}
+default_config=$skill_dir/config/ladder.json
+[ ! -f "$skill_dir/config/router.json" ] || default_config=$skill_dir/config/router.json
+config=${CC_ROUTER_CONFIG:-$default_config}
 log_dir=${XDG_STATE_HOME:-$HOME/.local/state}/cc-router
 log=$log_dir/laya.log
 
@@ -28,6 +30,13 @@ auth=()
 [ -n "${LAYA_API_KEY:-}" ] && auth=(-H "Authorization: Bearer $LAYA_API_KEY")
 # ${auth[@]+...} keeps bash 3.2 (macOS) from failing on an empty array under set -u
 health() { curl -s --max-time 2 ${auth[@]+"${auth[@]}"} "http://127.0.0.1:$port/health" || true; }
+
+# --check only reports; the router asks the user before starting the model
+if [ "${1:-}" = --check ]; then
+    [[ $(health) == *'"loaded"'* ]] && { echo "Laya is running on port $port."; exit 0; }
+    echo "Laya is not running on port $port." >&2
+    exit 1
+fi
 
 # Laya's /health lists the loaded checkpoints
 if [[ $(health) == *'"loaded"'* ]]; then
@@ -73,6 +82,9 @@ config = json.loads(text)
 for url in {config['laya_url'], *config.get('laya_urls', {}).values()}:
     parts = urlparse(url)
     text = text.replace(f'"{url}"', f'"{parts._replace(netloc=f"{parts.hostname}:{port}").geturl()}"')
+from datetime import datetime, timezone
+backup = path.with_name(path.name + '.' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%f') + '.bak')
+backup.write_bytes(path.read_bytes())
 path.write_text(text, encoding='utf-8')
 EOF
     port=$free

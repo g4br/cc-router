@@ -2,29 +2,75 @@
 
 ![cc-router](cc-router.png)
 
-Claude Code and Codex skill (`cc-router`) that routes delegated steps to a subagent with a model and effort suited to the step.
+Claude Code and Codex skill that proposes a configurable **model + reasoning
+ effort** for each delegated step, explains the decision, verifies results and
+records outcomes. Routing scripts use Python standard library; native host
+execution retains the existing login and permissions.
 
-- **Operator-aware ladders:** Claude Code uses Haiku → Sonnet → Opus → Fable; Codex uses Luna → Sol → Astra. The router detects the active operator or accepts `CC_ROUTER_OPERATOR=claude|codex`.
-- **Parallel batches:** independent steps run at the same time, each on its own model and effort.
-- **Justification:** every model choice is justified to the user and logged.
-- **Approval:** high-cost rungs require an explicit answer; Claude Code also uses a `permissions.ask` rule.
-- **Escalation:** a failed step automatically moves up the ladder.
-- **Claude Code subscription:** refuses to run when an Anthropic API credential would change billing; Fable is off by default.
-- **Output helpers:** caveman for text and ponytail for code, with installation paths for Claude Code and Codex.
-- **Laya:** uses the public [checkpoint](https://huggingface.co/convaiinnovations/laya) directly for both operators, with a heuristic fallback when the local server is unavailable.
-- **History:** decisions, verified outcomes and token counts in operator-specific JSONL files.
+- Provider-neutral candidate catalogue; model names are configuration data.
+- Eligibility checks, legacy heuristic fallback, and optional evidence-based
+  `economy`, `balanced` and `performance` policies.
+- Explicit approval, host confirmation, failure diagnosis and bounded retries.
+- Event-driven DAG scheduler: classify only ready tasks, reserve independent work
+  in parallel, validate completion and release dependents without an LLM watcher.
+- Optional local Laya scores, clearly labelled uncalibrated until enough outcomes
+  exist; no direct provider APIs, paid proxy or secondary execution CLI.
+- Versioned task/attempt history plus workflow efficiency including planning,
+  classification, delegation, execution, validation and rework; unknown stays unknown.
+
+## Flow
+
+```mermaid
+flowchart TD
+    O[Orchestrator: Claude Code or Codex] --> C{start_services.sh --check}
+    C -- Laya down --> A[Ask the user: start Laya?]
+    A -- yes --> S[start_services.sh]
+    A -- no, heuristic fallback --> T
+    C -- Laya up --> T
+    S --> T{single task or DAG?}
+
+    T -- DAG --> I[scheduler.py init run.json tasks.json]
+    I --> N[scheduler.py next --capacity N]
+    N -->|PENDING with deps DONE| V
+    T -- single --> V
+
+    subgraph RT[route.py]
+        direction TB
+        V[state.py check_state] --> F[failures.py diagnose]
+        F -- blocked --> B[blocked: no execution]
+        F --> E[selection.py eligible_candidates]
+        E --> L{backend}
+        L -- laya --> P[POST loopback /v1/systemone]
+        P -- unavailable --> H
+        L -- heuristic --> H[heuristic_level]
+        P --> M[telemetry.estimates]
+        H --> M
+        M --> D[selection.select: agent, model, effort]
+    end
+
+    D --> J[justify.py auto / approved / declined]
+    J --> X[Agent subagent_type=exec-model-effort]
+    X --> Y[Orchestrator verifies diff and acceptance]
+    Y --> K[record.py success / failure]
+    K -- success --> Z[scheduler.py finish: DONE, releases dependents]
+    K -- failure --> W[scheduler.py retry or stop]
+    Z --> N
+    W --> N
+    K --> G[(history.jsonl)]
+    G --> M
+```
 
 ## Requirements
 
 - Claude Code with a subscription (check `/status`) or Codex with native subagent tools.
-- Python 3.10+ for the Laya server; the routing scripts use only the standard library.
+- Python 3.10+ in Linux/macOS/WSL; the routing scripts use only the standard library. Laya is optional.
 - For the output helpers: Node.js and the [caveman](https://github.com/JuliusBrussee/caveman) and [ponytail](https://github.com/DietrichGebert/ponytail) integrations. Ponytail's Codex hooks need `node` on the shell's PATH.
 
 ## Installation
 
 ### Python dependencies
 
-For either operator, install the Laya server (PyTorch, Transformers, FastAPI and Uvicorn come with it) in the Python 3.10+ environment you will use for the skill:
+Only when opting into the Laya backend, install the Laya server (PyTorch, Transformers, FastAPI and Uvicorn come with it) in the Python 3.10+ environment you will use for the skill:
 
 ```bash
 python3 -m pip install "laya[serve]"
@@ -38,7 +84,7 @@ The routing scripts themselves need only the standard library. After installing 
 git clone https://github.com/g4br/cc-router ~/.codex/skills/cc-router
 ```
 
-Codex's native agent tool uses the model and effort returned by `route.py`; no generated agent files are needed.
+Codex uses the native agent tool when that session supports the proposed model and effort. No generated agent files are needed; routing never claims a proposal was applied.
 
 Install caveman's **skill** for Codex, using the command from its [official README](https://github.com/JuliusBrussee/caveman):
 
@@ -78,8 +124,10 @@ python ~/.claude/skills/cc-router/scripts/install.py
 
 In Claude Code, `install.py`:
 - checks that no credential would move billing off the subscription and that the caveman and ponytail skills are installed;
-- writes one agent per active rung to `~/.claude/agents/`;
+- writes one agent per active candidate to `~/.claude/agents/`;
 - writes the `permissions.ask` rules for rungs that need approval to `~/.claude/settings.json`, keeping the rest of the file.
+
+On both hosts, `install.py` also installs `laya[serve]` if missing, downloads the public checkpoint and sets `backend` to `laya` in `config/ladder.json`. Each time the skill is invoked, it runs `scripts/start_services.sh --check`; if Laya is down it asks whether to start it and only then runs `scripts/start_services.sh`. A no keeps the heuristic fallback.
 
 Restart Claude Code if `~/.claude/agents/` did not exist before.
 
@@ -87,7 +135,13 @@ In Codex, `install.py` detects the operator and exits without changing Claude Co
 
 ## Usage
 
-Ask the operator to use `cc-router` for a task suited to delegation. The full protocol is in [SKILL.md](SKILL.md). Routing depends on the host's permission to delegate and its available models.
+Ask the operator to use `cc-router` for a task suited to delegation. The minimal entrypoint is [SKILL.md](SKILL.md); load its references only as needed. Routing depends on the host's permission to delegate and its available models.
+
+For dependent work, see [scheduler usage](references/scheduler.md). Decompose
+into tasks, dependencies, ownership and acceptance criteria; the Python scheduler
+selects models only when tasks become ready. Native host tools perform execution,
+and validated completion events release dependents. The external CLI/app-server
+executor remains an extension point, not an implemented adapter.
 
 ## Use the public Laya checkpoint
 
@@ -111,7 +165,7 @@ The example and server launcher test a small PyTorch operation on available GPUs
 
 Use a port that is free on your machine. If another service already uses the configured port, `start_services.sh` finds the next free port and asks `Use port XXXX?`. A yes saves that port in `laya_url` and both `laya_urls` entries in `config/ladder.json` and starts Laya on it. A no or an empty answer leaves everything unchanged. Without a terminal, pipe the answer: `echo y | scripts/start_services.sh`. Never point the router at another service's port: its error stops routing instead of triggering the heuristic fallback. See the [Laya guide](references/laya.md#choose-an-available-port).
 
-Both operators use `http://127.0.0.1:8000/v1/systemone` by default. `backend` is already set to `laya` in `config/ladder.json`; if the server is unavailable, routing falls back to the heuristic. No training or GPU training job is needed. Laya's zero-shot scores for this model-selection question are unvalidated locally, so continue to verify outcomes. See the [Laya guide](references/laya.md) for setup and interpretation.
+Both operators use `http://127.0.0.1:8000/v1/systemone` by default. `install.py` sets `backend` to `laya` in `config/ladder.json` (the shipped default is `heuristic`), and routing falls back to the heuristic if the server is unavailable or has no rung above the threshold. No training or GPU training job is needed. Laya's zero-shot scores for this model-selection question are unvalidated locally, so continue to verify outcomes. See the [Laya guide](references/laya.md) for setup and interpretation.
 
 The skill translates each task summary into English for Laya to select the model and effort. It keeps the user's primary language for the delegated agent's report and the final response.
 
@@ -121,24 +175,76 @@ After each routed step, record whether it passed on the first attempt without re
 python scripts/record.py <decision-id> success 48210 37.5 --no-rework true
 ```
 
-Token cost is tracked separately from the outcome because one observed run cannot establish which untried model would have used the fewest tokens.
+Token consumption is tracked separately from the outcome. It is not monetary cost or an exact subscription quota fraction; one run cannot establish how untried candidates would have performed.
+
+## v2 configuration and compatibility
+
+`CC_ROUTER_CONFIG` overrides `config/router.json` (if present), otherwise
+`config/ladder.json`. The existing ladder is migrated in memory; no user config is
+rewritten. `CC_ROUTER_OPERATOR=claude|codex` overrides session detection independently.
+
+```bash
+python scripts/migrate.py config/ladder.json > /tmp/router-preview.json
+python scripts/migrate.py config/ladder.json --write config/router.json
+```
+
+Existing destinations receive a timestamped backup. Roll back by selecting the
+original ladder with `CC_ROUTER_CONFIG`. Read the [schema and policy reference](references/router-v2.md)
+for availability, supported combinations, version segmentation and policy weights.
+All existing candidates remain in the bundled configuration. Host support and
+billing inclusion must be confirmed; no additional model is inferred from its name.
+
+The public single-state and batch CLI and output fields remain available:
+
+```bash
+CC_ROUTER_OPERATOR=codex python scripts/route.py '{"description":"Implement a parser and run roundtrip tests","operation":"implementation","files":2,"ambiguous":false,"critical":false}'
+CC_ROUTER_OPERATOR=claude python scripts/route.py '{"description":"Implement a parser and run roundtrip tests","operation":"implementation","files":2,"ambiguous":false,"critical":false}'
+```
+
+Claude requires the corresponding generated agent. Both return an intention with
+`execution.applied: false`. Use native tools and record actual host-reported settings.
+See [examples](references/examples.md) for approval, recording and diagnosis.
+
+Intentional corrections: invalid inputs now fail; unknown historical outcomes do
+not count as successful completions; `failed_with` alone requests diagnosis rather
+than automatically promoting a model. Laya scores are not guaranteed probabilities.
+Legacy routing remains available through `policy: legacy` with current safety gates.
+
+## Tests and offline benchmark
+
+```bash
+python -m unittest discover -s tests -v
+python scripts/benchmark.py --output /tmp/cc-router-benchmark.json
+```
+
+Tests use temporary homes, mock native reports and a local mock Laya server. They
+never install real host agents, start the Laya model or call a paid API. The benchmark
+compares four policies across six task profiles and two hosts on identical synthetic
+observations. It measures policy behavior, not real-model performance or savings.
+See [implementation and validation record](references/implementation.md).
 
 ## Files
 
 | File | Purpose |
 |---|---|
-| `SKILL.md` | Orchestrator protocol |
+| `SKILL.md` | Minimal bootstrap and conditional reference links |
 | `laya-example.py` | Example of Laya choosing effort for a fixed model |
 | `config/ladder.json` | Operator-specific ladders, heuristic, limits and settings |
 | `scripts/install.py` | Builds the agents and the approval rules |
-| `scripts/route.py` | Picks the rung for a step or a batch |
+| `scripts/route.py` | Stable CLI, legacy helpers and v2 decision orchestration |
+| `scripts/candidates.py`, `state.py` | Configuration migration, capabilities and strict validation |
+| `scripts/selection.py`, `telemetry.py`, `failures.py` | Policy, comparable observations and failure diagnosis |
+| `scripts/scheduler.py` | Persistent DAG reservations, completion events and workflow efficiency |
+| `references/scheduler.md`, `protocol.md` | On-demand orchestration and execution details |
+| `scripts/planning.py`, `verify_batch.py` | Dependency waves and actual-change ownership checks |
+| `scripts/migrate.py`, `benchmark.py` | Explicit migration/backup and reproducible offline comparison |
 | `scripts/justify.py` | Logs the justification and the user's answer |
 | `scripts/record.py` | Logs the step's result |
 | `scripts/feedback.py` | Corrects a no-rework label discovered after recording |
 | `scripts/laya_device.py` | Checks which GPU can run PyTorch, with CPU fallback |
 | `scripts/serve_laya.py` | Starts the official Laya server on the selected device |
 | `scripts/start_services.sh` | Starts Laya in the background on the port set in `config/ladder.json` |
-| `references/examples.md` | 320 examples by model and effort, plus 49 routing cases checked against the router |
+| `references/examples.md` | Current commands and examples for both hosts; archived v1 examples linked there |
 | `references/laya.md` | Public Laya checkpoint setup and decision limits |
 
 History lives in `~/.claude/cc-router/history.jsonl` or `~/.codex/cc-router/history.jsonl`, according to the detected operator.

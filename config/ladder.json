@@ -4,7 +4,7 @@
   "laya_urls": {"claude": "http://127.0.0.1:8001/v1/systemone", "codex": "http://127.0.0.1:8001/v1/systemone"},
   "laya_enabled_operators": ["claude", "codex"],
   "laya_checkpoint": "english",
-  "laya_timeout_s": 5,
+  "laya_timeout_s": 30,
   "success_threshold": 0.8,
   "min_cost_samples": 20,
   "file_limit": 3,
@@ -15,18 +15,19 @@
   "laya_criteria": {"A": "yes, likely to complete the task on the first attempt without rework", "B": "no, likely to fail or need rework"},
   "ladders": {
     "claude": [
-    {"agent": "exec-haiku",         "model": "haiku",  "effort": null,     "active": true,  "approval": false, "label": "Haiku",                    "suited_for": "simple mechanical task, no decisions"},
-    {"agent": "exec-sonnet-low",    "model": "sonnet", "effort": "low",    "active": true,  "approval": false, "label": "Sonnet at low effort",     "suited_for": "small quick change following an existing pattern"},
-    {"agent": "exec-sonnet-medium", "model": "sonnet", "effort": "medium", "active": true,  "approval": false, "label": "Sonnet at medium effort",  "suited_for": "day-to-day work with a clear scope"},
+    {"agent": "exec-haiku-low",     "model": "haiku",  "effort": "low",    "active": true,  "approval": false, "skills": [], "label": "Haiku at low effort",      "suited_for": "one-shot read, extraction, classification or format conversion with a checkable output; no search and no multi-step work"},
+    {"agent": "exec-haiku-medium",  "model": "haiku",  "effort": "medium", "active": true,  "approval": false, "skills": [], "label": "Haiku at medium effort",   "suited_for": "short tool task with no decisions: find call sites, mechanical edit with a check, small script from a template"},
+    {"agent": "exec-haiku-high",    "model": "haiku",  "effort": "high",   "active": true,  "approval": false, "skills": [], "label": "Haiku at high effort",     "suited_for": "pattern-following change or multi-file mechanical work with strict instructions and a test to run"},
+    {"agent": "exec-sonnet-medium", "model": "sonnet", "effort": "medium", "active": true,  "approval": false, "label": "Sonnet at medium effort",  "suited_for": "day-to-day coding with a clear scope"},
     {"agent": "exec-sonnet-high",   "model": "sonnet", "effort": "high",   "active": true,  "approval": false, "label": "Sonnet at high effort",    "suited_for": "clear scope where verification matters and edge cases are likely"},
-    {"agent": "exec-opus-medium",   "model": "opus",   "effort": "medium", "active": true,  "approval": false, "label": "Opus at medium effort",    "suited_for": "stronger reasoning with a defined goal: several modules, design judgment"},
+    {"agent": "exec-opus-medium",   "model": "opus",   "effort": "medium", "active": true,  "approval": false, "label": "Opus at medium effort",    "suited_for": "stronger reasoning with a defined goal: several modules, design judgment, long cohesive change"},
     {"agent": "exec-opus-high",     "model": "opus",   "effort": "high",   "active": true,  "approval": false, "label": "Opus at high effort",      "suited_for": "complex reasoning where errors are costly or the cause is not local"},
     {"agent": "exec-opus-xhigh",    "model": "opus",   "effort": "xhigh",  "active": true,  "approval": true,  "label": "Opus at xhigh effort",     "suited_for": "deeper reasoning, more tokens, for an open problem"},
-    {"agent": "exec-opus-max",      "model": "opus",   "effort": "max",    "active": true,  "approval": true,  "label": "Opus at max effort",       "suited_for": "hard problem worked through unattended; diminishing returns and prone to overthinking"},
-    {"agent": "exec-fable-low",     "model": "fable",  "effort": "low",    "active": false, "approval": true,  "label": "Fable at low effort",      "suited_for": "open high-risk problem when a first draft to review is enough"},
-    {"agent": "exec-fable-medium",  "model": "fable",  "effort": "medium", "active": false, "approval": true,  "label": "Fable at medium effort",   "suited_for": "long autonomous work, root-cause investigation"},
-    {"agent": "exec-fable-high",    "model": "fable",  "effort": "high",   "active": false, "approval": true,  "label": "Fable at high effort",     "suited_for": "long autonomous work where errors are costly"},
-    {"agent": "exec-fable-xhigh",   "model": "fable",  "effort": "xhigh",  "active": false, "approval": true,  "label": "Fable at xhigh effort",    "suited_for": "long, autonomous, ambiguous work where errors are costly"}
+    {"agent": "exec-opus-max",      "model": "opus",   "effort": "max",    "active": true,  "approval": true,  "escalation_only": true, "label": "Opus at max effort", "suited_for": "hard problem worked through unattended; diminishing returns and prone to overthinking"},
+    {"agent": "exec-fable-low",     "model": "fable",  "effort": "low",    "active": true,  "approval": true,  "label": "Fable at low effort",      "suited_for": "step that failed on Opus: strong judgment at the lowest Fable cost, competitive per task with Opus"},
+    {"agent": "exec-fable-medium",  "model": "fable",  "effort": "medium", "active": true,  "approval": true,  "label": "Fable at medium effort",   "suited_for": "long autonomous work, root-cause investigation"},
+    {"agent": "exec-fable-high",    "model": "fable",  "effort": "high",   "active": true,  "approval": true,  "label": "Fable at high effort",     "suited_for": "long autonomous work where errors are costly"},
+    {"agent": "exec-fable-xhigh",   "model": "fable",  "effort": "xhigh",  "active": true,  "approval": true,  "label": "Fable at xhigh effort",    "suited_for": "long, autonomous, ambiguous work where errors are costly"}
     ],
     "codex": [
       {"agent": "exec-luna-low",     "model": "gpt-6-luna",    "effort": "low",    "active": true,  "approval": false, "label": "Luna at low effort",     "suited_for": "simple mechanical task, no decisions"},
@@ -40,22 +41,41 @@
     ]
   },
   "base_level_by_operation": {
-    "search":          0,
-    "read":            0,
-    "mechanical_edit": 0,
-    "tweak":           1,
-    "implementation":  2,
-    "writing":         2,
-    "data_analysis":   2,
-    "debugging":       3,
-    "review":          4,
-    "architecture":    5,
-    "research":        6,
-    "security":        6,
-    "investigation":   9,
-    "long_task":       9
+    "claude": {
+      "read":            0,
+      "search":          1,
+      "mechanical_edit": 1,
+      "tweak":           2,
+      "implementation":  3,
+      "writing":         3,
+      "data_analysis":   3,
+      "debugging":       4,
+      "review":          5,
+      "architecture":    5,
+      "long_task":       5,
+      "research":        6,
+      "security":        6,
+      "investigation":   6
+    },
+    "codex": {
+      "search":          0,
+      "read":            0,
+      "mechanical_edit": 0,
+      "tweak":           1,
+      "implementation":  2,
+      "writing":         2,
+      "data_analysis":   2,
+      "debugging":       3,
+      "review":          4,
+      "architecture":    5,
+      "research":        6,
+      "security":        6,
+      "investigation":   9,
+      "long_task":       9
+    }
   },
   "ceiling_by_operation": {
-    "security": 7
+    "claude": {"security": 8},
+    "codex":  {"security": 7}
   }
 }

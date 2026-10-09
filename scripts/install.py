@@ -1,14 +1,18 @@
 import sys
 import json
 import shutil
+import argparse
 import subprocess
+from datetime import datetime, timezone
 
 from common import load_config, check_subscription, detect_operator, last_active_rung, find_skill, agents_dir, history_path, settings_file, config_file
 
 #-----------------------------------------------------------
 # Input and paths
 #-----------------------------------------------------------
-if len(sys.argv) > 1: raise ValueError('usage: python install.py (no arguments; reads config/ladder.json)')
+parser = argparse.ArgumentParser(description='Build the cc-router agents and choose the routing backend.')
+parser.add_argument('--backend', choices=('laya', 'heuristic'), help='skip the question and set the backend explicitly')
+args = parser.parse_args()
 
 # the body is the subagent's system prompt; it does not see the orchestrator's conversation
 lean_template = '''Lean output: follow the preloaded skills ({skill_names}); if they are not in your context, invoke them with the Skill tool before you start.
@@ -51,22 +55,44 @@ config = load_config(operator)
 last_active_rung(config['ladder'])
 
 #-----------------------------------------------------------
-# Laya: package, public checkpoint and backend (both hosts)
+# Backend: heuristic unless the user opts into the Laya difficulty gate
 #-----------------------------------------------------------
-try:
-    import laya, fastapi, uvicorn  # noqa: F401
-except ImportError:
-    print('Installing laya[serve] (PyTorch, Transformers, FastAPI, Uvicorn)...', flush=True)
-    subprocess.run([sys.executable, '-m', 'pip', 'install', 'laya[serve]'], check=True)
-# a one-off prediction downloads the public checkpoint into the Hugging Face cache; later runs are instant
-laya_cli = shutil.which('laya') or sys.exit('laya command not found after install; check that the pip bin directory is on PATH')
-print(f"Downloading the Laya checkpoint '{config['laya_checkpoint']}' (first run only)...", flush=True)
-subprocess.run([laya_cli, '--predict', '--model', config['laya_checkpoint'], '--device', 'cpu', '--json', 'warm-up'], check=True, stdout=subprocess.DEVNULL)
-# string replace keeps the file layout; a backend already set to laya is left alone
+backend = args.backend
+if backend is None:
+    print('The Laya difficulty gate (zero-shot scores that filter the ladder) has not been validated yet.')
+    print('Without it, the router uses the heuristic. Enabling Laya installs laya[serve] and downloads a checkpoint.')
+    # an empty answer means no; a non-interactive stdin keeps the current value
+    if sys.stdin.isatty():
+        answer = input('Enable the Laya backend? [y/N] ')
+        backend = 'laya' if answer.strip().lower() in ('y', 'yes') else 'heuristic'
+    else:
+        print('Non-interactive stdin: backend unchanged (pass --backend to set it).')
+#
+if backend == 'laya':
+    try:
+        import laya, fastapi, uvicorn  # noqa: F401
+    except ImportError:
+        print('Installing laya[serve] (PyTorch, Transformers, FastAPI, Uvicorn)...', flush=True)
+        subprocess.run([sys.executable, '-m', 'pip', 'install', 'laya[serve]'], check=True)
+    # a one-off prediction downloads the public checkpoint into the Hugging Face cache; later runs are instant
+    laya_cli = shutil.which('laya') or sys.exit('laya command not found after install; check that the pip bin directory is on PATH')
+    print(f"Downloading the Laya checkpoint '{config['laya_checkpoint']}' (first run only)...", flush=True)
+    subprocess.run([laya_cli, '--predict', '--model', config['laya_checkpoint'], '--device', 'cpu', '--json', 'warm-up'], check=True, stdout=subprocess.DEVNULL)
+# string replace keeps the file layout; a timestamped backup is written first (same pattern as migrate.py)
 text = config_file.read_text(encoding='utf-8')
-if '"backend": "heuristic"' in text:
-    config_file.write_text(text.replace('"backend": "heuristic"', '"backend": "laya"', 1), encoding='utf-8')
-    print(f'Save: {config_file} (backend: laya)')
+# no entry means the heuristic (validate_config default); a missing entry cannot be rewritten by string replace
+has_entry = '"backend"' in text
+current = 'laya' if '"backend": "laya"' in text else 'heuristic' if '"backend": "heuristic"' in text or not has_entry else None
+if backend is None: backend = current
+if current is None or (current != backend and not has_entry):
+    sys.exit(f'{config_file}: cannot find a "backend" entry to rewrite; set "backend": "{backend}" by hand')
+if current != backend:
+    backup = config_file.with_name(config_file.name + '.' + datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S%f') + '.bak')
+    backup.write_bytes(config_file.read_bytes())
+    config_file.write_text(text.replace(f'"backend": "{current}"', f'"backend": "{backend}"', 1), encoding='utf-8')
+    print(f'Save: {config_file} (backend: {backend}; backup: {backup.name})')
+else:
+    print(f'Backend stays {backend} in {config_file}')
 
 if operator == 'codex':
     print('Codex uses its native agent tool. No agent files or Claude Code settings are needed.')

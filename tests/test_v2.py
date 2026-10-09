@@ -320,7 +320,7 @@ class AdditionalContractsTest(unittest.TestCase):
             from common import non_subscription_vars
             for name in non_subscription_vars:
                 env.pop(name, None)
-            result = subprocess.run([sys.executable, str(ROOT / 'scripts/install.py')], env=env, text=True, capture_output=True)
+            result = subprocess.run([sys.executable, str(ROOT / 'scripts/install.py')], env=env, text=True, capture_output=True, stdin=subprocess.DEVNULL)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(unrelated.read_text(), 'owned by another skill')
             current = json.loads(settings.read_text())

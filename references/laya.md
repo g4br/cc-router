@@ -1,7 +1,8 @@
 # Optional local Laya backend
 
-The shipped default is the heuristic backend; `install.py` installs Laya,
-downloads the public English checkpoint and switches `backend` to `laya`.
+The bundled `config/ladder.json` ships with `backend: laya`, but the Laya difficulty
+gate is not validated yet. `install.py` asks (default no, or `--backend laya|heuristic`)
+before it installs Laya and downloads the public English checkpoint.
 Routing never starts it during a unit test or ordinary decision: the skill runs
 `start_services.sh --check` on invocation and asks the user before starting. The operator supplies a faithful English summary
 and keeps the user's language for reports.
@@ -36,6 +37,10 @@ The request contains only description, operation, files, ambiguity and criticali
 It excludes user language, execution controls, targets, credentials and history.
 Questions are generated from **eligible** candidate profiles. Only the explicit
 local authentication header, if configured, carries the Laya credential.
+
+To cancel position bias, each question is sent twice in the same request, with `criteria`
+in the order A,B and B,A (laya-serve renders options in key order). The score is the mean
+of the two "A" (yes) probabilities. `option_order` was not used or verified.
 
 The returned number is an **uncalibrated score**, not a guaranteed probability of
 success. `success_threshold` remains a transitional heuristic. If no eligible

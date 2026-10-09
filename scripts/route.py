@@ -62,6 +62,8 @@ def heuristic_level(state, config):
         reasons.append('+1 critical')
     return level, reasons
 
+SWAPPED_SUFFIX = '#swapped'
+
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         raise ValueError("laya response: redirects are not permitted")
@@ -69,14 +71,17 @@ class NoRedirect(HTTPRedirectHandler):
 
 def laya_probabilities(state, config):
     # one binary question per rung, with neutral keys: Laya's noul type
-    # tends to follow the true/false labels instead of the content
+    # tends to follow the true/false labels instead of the content.
+    # laya-serve renders options in criteria key order, so every question is sent twice,
+    # once as A,B and once as B,A, and the two "A" (yes) probabilities are averaged to
+    # cancel position bias. Both copies travel in the same request.
+    criteria = config['laya_criteria']
+    swapped = {'B': criteria['B'], 'A': criteria['A']}
     questions = {}
     for rung in config['ladder']:
-        questions[rung['agent']] = {
-            'type':         'choice',
-            'instructions': config['laya_question'].format(label=rung['label'], suited_for=rung['suited_for']),
-            'criteria':     config['laya_criteria'],
-        }
+        instructions = config['laya_question'].format(label=rung['label'], suited_for=rung['suited_for'])
+        questions[rung['agent']] = {'type': 'choice', 'instructions': instructions, 'criteria': criteria}
+        questions[rung['agent'] + SWAPPED_SUFFIX] = {'type': 'choice', 'instructions': instructions, 'criteria': swapped}
     # Explicitly select the public English checkpoint used by this skill.
     request_body = {'state': laya_state(state), 'questions': questions, 'model': config['laya_checkpoint']}
     body = json.dumps(request_body, ensure_ascii=False).encode('utf-8')
@@ -88,10 +93,14 @@ def laya_probabilities(state, config):
     try:
         with build_opener(ProxyHandler({}), NoRedirect()).open(request, timeout=config['laya_timeout_s']) as response:
             answers = json.load(response)['answers']
-        values = {name: answers[name]['probabilities']['A'] for name in questions}
         from candidates import number
-        for value in values.values():
-            number(value, 'laya score', 0, 1)
+        values = {}
+        for rung in config['ladder']:
+            name = rung['agent']
+            pair = [answers[key]['probabilities']['A'] for key in (name, name + SWAPPED_SUFFIX)]
+            for value in pair:
+                number(value, 'laya score', 0, 1)
+            values[name] = sum(pair) / 2
         return values
     except (KeyError, TypeError, ValueError):
         raise ValueError('laya response: invalid score contract') from None

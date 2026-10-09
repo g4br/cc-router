@@ -18,7 +18,7 @@ class LayaHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         body = self.rfile.read(int(self.headers['Content-Length']))
         LayaHandler.received = json.loads(body)
-        answers = {name: {'probabilities': {'A': 0.9 if name in ('exec-sol-medium', 'exec-sol-high') else 0.1}}
+        answers = {name: {'probabilities': {'A': 0.9 if name.split('#')[0] in ('exec-sol-medium', 'exec-sol-high') else 0.1}}
                    for name in LayaHandler.received['questions']}
         encoded = json.dumps({'answers': answers}).encode()
         self.send_response(200)

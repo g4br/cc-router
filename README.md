@@ -127,7 +127,9 @@ In Claude Code, `install.py`:
 - writes one agent per active candidate to `~/.claude/agents/`;
 - writes the `permissions.ask` rules for rungs that need approval to `~/.claude/settings.json`, keeping the rest of the file.
 
-On both hosts, `install.py` also installs `laya[serve]` if missing, downloads the public checkpoint and sets `backend` to `laya` in `config/ladder.json`. Each time the skill is invoked, it runs `scripts/start_services.sh --check`; if Laya is down it asks whether to start it and only then runs `scripts/start_services.sh`. A no keeps the heuristic fallback.
+On both hosts, `install.py` then chooses the backend. It never switches to `laya` by itself: it explains that the Laya difficulty gate has not been validated yet and asks `Enable the Laya backend? [y/N]`. Only a yes installs `laya[serve]` if missing, downloads the public checkpoint and sets `backend` to `laya` in the active config. An empty answer or no sets `backend` to `heuristic`; stdin that is not a terminal leaves the current value unchanged. Pass `--backend laya` or `--backend heuristic` to choose without a question. When the value changes, the config is first copied to a timestamped `.bak` file next to it.
+
+Each time the skill is invoked, it runs `scripts/start_services.sh --check`; if Laya is down it asks whether to start it and only then runs `scripts/start_services.sh`. A no keeps the heuristic fallback.
 
 Restart Claude Code if `~/.claude/agents/` did not exist before.
 
@@ -161,11 +163,11 @@ scripts/start_services.sh
 
 The script reads the port from `config/ladder.json`, starts the official Laya server in the background through `scripts/serve_laya.py`, waits until the checkpoint is loaded and prints the PID to stop it. If Laya is already running on that port, it does nothing. The log goes to `~/.local/state/cc-router/laya.log` (or `$XDG_STATE_HOME/cc-router/laya.log`).
 
-The example and server launcher test a small PyTorch operation on available GPUs. They use a working GPU or fall back to CPU, including on an MX350 with a PyTorch build that cannot run `sm_61` kernels. The server listens on `127.0.0.1:8000` and loads only the English checkpoint by default.
+The example and server launcher test a small PyTorch operation on available GPUs. They use a working GPU or fall back to CPU, including on an MX350 with a PyTorch build that cannot run `sm_61` kernels. The server listens on `127.0.0.1:8001` and loads only the English checkpoint by default.
 
-Use a port that is free on your machine. If another service already uses the configured port, `start_services.sh` finds the next free port and asks `Use port XXXX?`. A yes saves that port in `laya_url` and both `laya_urls` entries in `config/ladder.json` and starts Laya on it. A no or an empty answer leaves everything unchanged. Without a terminal, pipe the answer: `echo y | scripts/start_services.sh`. Never point the router at another service's port: its error stops routing instead of triggering the heuristic fallback. See the [Laya guide](references/laya.md#choose-an-available-port).
+Use a port that is free on your machine. If another service already uses the configured port, `start_services.sh` finds the next free port and asks `Use port XXXX?`. A yes saves that port in `laya_url` and both `laya_urls` entries in `config/ladder.json` and starts Laya on it. A no or an empty answer leaves everything unchanged. Without a terminal, pipe the answer: `echo y | scripts/start_services.sh`. Never point the router at another service's port: its error stops routing instead of triggering the heuristic fallback. See the [Laya guide](references/laya.md#installation-and-startup).
 
-Both operators use `http://127.0.0.1:8000/v1/systemone` by default. `install.py` sets `backend` to `laya` in `config/ladder.json` (the shipped default is `heuristic`), and routing falls back to the heuristic if the server is unavailable or has no rung above the threshold. No training or GPU training job is needed. Laya's zero-shot scores for this model-selection question are unvalidated locally, so continue to verify outcomes. See the [Laya guide](references/laya.md) for setup and interpretation.
+Both operators use `http://127.0.0.1:8001/v1/systemone` by default. The bundled `config/ladder.json` ships with `backend: laya`, but the Laya difficulty gate is not validated yet, so `install.py` asks before keeping it (see [Claude Code](#claude-code)). Routing falls back to the heuristic if the server is unavailable or has no rung above the threshold. No training or GPU training job is needed. Laya's zero-shot scores for this model-selection question are unvalidated locally, so continue to verify outcomes. See the [Laya guide](references/laya.md) for setup and interpretation.
 
 The skill translates each task summary into English for Laya to select the model and effort. It keeps the user's primary language for the delegated agent's report and the final response.
 

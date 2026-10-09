@@ -43,29 +43,29 @@
   },
   "ladders": {
     "claude": [
-    {"agent": "exec-haiku-low",     "model": "haiku",  "effort": "low",    "active": true,  "approval": false, "skills": [], "label": "Haiku at low effort",      "suited_for": "one-shot read, extraction, classification or format conversion with a checkable output; no search and no multi-step work"},
-    {"agent": "exec-haiku-medium",  "model": "haiku",  "effort": "medium", "active": true,  "approval": false, "skills": [], "label": "Haiku at medium effort",   "suited_for": "short tool task with no decisions: find call sites, mechanical edit with a check, small script from a template"},
-    {"agent": "exec-haiku-high",    "model": "haiku",  "effort": "high",   "active": true,  "approval": false, "skills": [], "label": "Haiku at high effort",     "suited_for": "pattern-following change or multi-file mechanical work with strict instructions and a test to run"},
-    {"agent": "exec-sonnet-medium", "model": "sonnet", "effort": "medium", "active": true,  "approval": false, "label": "Sonnet at medium effort",  "suited_for": "day-to-day coding with a clear scope"},
-    {"agent": "exec-sonnet-high",   "model": "sonnet", "effort": "high",   "active": true,  "approval": false, "label": "Sonnet at high effort",    "suited_for": "clear scope where verification matters and edge cases are likely"},
-    {"agent": "exec-opus-medium",   "model": "opus",   "effort": "medium", "active": true,  "approval": false, "label": "Opus at medium effort",    "suited_for": "stronger reasoning with a defined goal: several modules, design judgment, long cohesive change"},
-    {"agent": "exec-opus-high",     "model": "opus",   "effort": "high",   "active": true,  "approval": false, "label": "Opus at high effort",      "suited_for": "complex reasoning where errors are costly or the cause is not local"},
-    {"agent": "exec-opus-xhigh",    "model": "opus",   "effort": "xhigh",  "active": true,  "approval": true,  "label": "Opus at xhigh effort",     "suited_for": "deeper reasoning, more tokens, for an open problem"},
-    {"agent": "exec-opus-max",      "model": "opus",   "effort": "max",    "active": true,  "approval": true,  "escalation_only": true, "label": "Opus at max effort", "suited_for": "hard problem worked through unattended; diminishing returns and prone to overthinking"},
-    {"agent": "exec-fable-low",     "model": "fable",  "effort": "low",    "active": true,  "approval": true,  "label": "Fable at low effort",      "suited_for": "step that failed on Opus: strong judgment at the lowest Fable cost, competitive per task with Opus"},
-    {"agent": "exec-fable-medium",  "model": "fable",  "effort": "medium", "active": true,  "approval": true,  "label": "Fable at medium effort",   "suited_for": "long autonomous work, root-cause investigation"},
-    {"agent": "exec-fable-high",    "model": "fable",  "effort": "high",   "active": true,  "approval": true,  "label": "Fable at high effort",     "suited_for": "long autonomous work where errors are costly"},
-    {"agent": "exec-fable-xhigh",   "model": "fable",  "effort": "xhigh",  "active": true,  "approval": true,  "label": "Fable at xhigh effort",    "suited_for": "long, autonomous, ambiguous work where errors are costly"}
+    {"agent": "exec-haiku-low",     "model": "haiku",  "effort": "low",    "active": true,  "approval": false, "skills": [], "restrictions": {"allow_ambiguous": false, "allow_critical": false}, "label": "Haiku at low effort",      "suited_for": "well-specified one-shot or batch work with a cheap check: extraction, classification, format conversion, renames, boilerplate; no search, no decisions, nothing ambiguous or critical"},
+    {"agent": "exec-haiku-medium",  "model": "haiku",  "effort": "medium", "active": true,  "approval": false, "skills": [], "restrictions": {"allow_ambiguous": false}, "label": "Haiku at medium effort",   "suited_for": "short well-specified task with known tools: find call sites, a small script or function with unit tests, a query or command from a clear spec"},
+    {"agent": "exec-haiku-high",    "model": "haiku",  "effort": "high",   "active": true,  "approval": false, "skills": [], "restrictions": {"allow_ambiguous": false}, "label": "Haiku at high effort",     "suited_for": "localized problem that needs care in one area: a bug with a stack trace, a small diff review, edge-case tests, a pattern-following multi-file change with a test to run"},
+    {"agent": "exec-sonnet-medium", "model": "sonnet", "effort": "medium", "active": true,  "approval": false, "label": "Sonnet at medium effort",  "suited_for": "day-to-day coding with a clear scope: a feature, endpoint or end-to-end script with tests, integrating a few components"},
+    {"agent": "exec-sonnet-high",   "model": "sonnet", "effort": "high",   "active": true,  "approval": false, "label": "Sonnet at high effort",    "suited_for": "clear scope where verification matters: failure handling, concurrency or edge cases across a few components; reproduce before fixing"},
+    {"agent": "exec-opus-medium",   "model": "opus",   "effort": "medium", "active": true,  "approval": false, "label": "Opus at medium effort",    "suited_for": "stronger reasoning with a defined goal: a complete feature or pipeline in real code, several modules, design judgment, long cohesive change"},
+    {"agent": "exec-opus-high",     "model": "opus",   "effort": "high",   "active": true,  "approval": false, "label": "Opus at high effort",      "suited_for": "errors are costly or the cause is not local: change across many modules, debugging with several hypotheses, security review, long agentic session"},
+    {"agent": "exec-opus-xhigh",    "model": "opus",   "effort": "xhigh",  "active": true,  "approval": true,  "label": "Opus at xhigh effort",     "suited_for": "deep architecture, concurrency, numerical or ML problem with long-term trade-offs; an open problem"},
+    {"agent": "exec-opus-max",      "model": "opus",   "effort": "max",    "active": true,  "approval": true,  "escalation_only": true, "label": "Opus at max effort", "suited_for": "hard problem worked through unattended after Opus at xhigh fell short; diminishing returns and prone to overthinking"},
+    {"agent": "exec-fable-low",     "model": "fable",  "effort": "low",    "active": true,  "approval": true,  "label": "Fable at low effort",      "suited_for": "step that failed on Opus: the strongest judgment in a short answer, such as a likely root cause, a second opinion on a critical design or a precise spec for cheaper executors"},
+    {"agent": "exec-fable-medium",  "model": "fable",  "effort": "medium", "active": true,  "approval": true,  "label": "Fable at medium effort",   "suited_for": "non-trivial algorithm or precision engineering: correct edge cases, output identical to a reference, root-cause investigation, long autonomous work"},
+    {"agent": "exec-fable-high",    "model": "fable",  "effort": "high",   "active": true,  "approval": true,  "label": "Fable at high effort",     "suited_for": "long autonomous work where subtle bugs are costly: race conditions, rewriting critical code with proven output equivalence, checks at every stage"},
+    {"agent": "exec-fable-xhigh",   "model": "fable",  "effort": "xhigh",  "active": true,  "approval": true,  "label": "Fable at xhigh effort",    "suited_for": "the ceiling: a problem that defeated Opus at xhigh, a production failure from fragmented evidence, research-grade design, a final review before a critical release"}
     ],
     "codex": [
-      {"agent": "exec-luna-low",     "model": "gpt-6-luna",    "effort": "low",    "active": true,  "approval": false, "label": "Luna at low effort",     "suited_for": "simple mechanical task, no decisions"},
-      {"agent": "exec-sol-low",      "model": "gpt-6.1-sol",   "effort": "low",    "active": true,  "approval": false, "label": "Sol at low effort",      "suited_for": "small quick change following an existing pattern"},
-      {"agent": "exec-sol-medium",   "model": "gpt-6.1-sol",   "effort": "medium", "active": true,  "approval": false, "label": "Sol at medium effort",   "suited_for": "day-to-day work with a clear scope"},
-      {"agent": "exec-sol-high",     "model": "gpt-6.1-sol",   "effort": "high",   "active": true,  "approval": false, "label": "Sol at high effort",     "suited_for": "clear scope where verification matters and edge cases are likely"},
-      {"agent": "exec-astra-medium", "model": "gpt-6-astra",   "effort": "medium", "active": true,  "approval": false, "label": "Astra at medium effort", "suited_for": "stronger reasoning with a defined goal: several modules, design judgment"},
-      {"agent": "exec-astra-high",   "model": "gpt-6-astra",   "effort": "high",   "active": true,  "approval": false, "label": "Astra at high effort",   "suited_for": "complex reasoning where errors are costly or the cause is not local"},
-      {"agent": "exec-astra-xhigh",  "model": "gpt-6-astra",   "effort": "xhigh",  "active": true,  "approval": true,  "label": "Astra at xhigh effort",  "suited_for": "deeper reasoning, more tokens, for an open problem"},
-      {"agent": "exec-astra-max",    "model": "gpt-6-astra",   "effort": "max",    "active": true,  "approval": true,  "label": "Astra at max effort",    "suited_for": "hard problem worked through unattended; diminishing returns and prone to overthinking"}
+      {"agent": "exec-luna-low",     "model": "gpt-6-luna",    "effort": "low",    "active": true,  "approval": false, "restrictions": {"allow_ambiguous": false, "allow_critical": false}, "label": "Luna at low effort",     "suited_for": "local, deterministic, well-specified edit with a cheap check: rename, docstring, formatting, a one-line fix; nothing ambiguous or critical"},
+      {"agent": "exec-sol-low",      "model": "gpt-6.1-sol",   "effort": "low",    "active": true,  "approval": false, "label": "Sol at low effort",      "suited_for": "small routine component following an existing pattern, with a few API or layout decisions: an endpoint, a join query, a test, pagination"},
+      {"agent": "exec-sol-medium",   "model": "gpt-6.1-sol",   "effort": "medium", "active": true,  "approval": false, "label": "Sol at medium effort",   "suited_for": "end-to-end feature across modules with predictable contract tests"},
+      {"agent": "exec-sol-high",     "model": "gpt-6.1-sol",   "effort": "high",   "active": true,  "approval": false, "label": "Sol at high effort",     "suited_for": "integration with failures or concurrency: reproduce the failure first; retries, shared state, async changes without breaking contracts"},
+      {"agent": "exec-astra-medium", "model": "gpt-6-astra",   "effort": "medium", "active": true,  "approval": false, "label": "Astra at medium effort", "suited_for": "architectural review or multi-cause diagnosis across layers where more than one solution is viable"},
+      {"agent": "exec-astra-high",   "model": "gpt-6-astra",   "effort": "high",   "active": true,  "approval": false, "label": "Astra at high effort",   "suited_for": "critical systems and invariants: large regression risk, several hypotheses, strong evidence required"},
+      {"agent": "exec-astra-xhigh",  "model": "gpt-6-astra",   "effort": "xhigh",  "active": true,  "approval": true,  "label": "Astra at xhigh effort",  "suited_for": "complex decisions with deep trade-offs under incomplete specifications and failure scenarios"},
+      {"agent": "exec-astra-max",    "model": "gpt-6-astra",   "effort": "max",    "active": true,  "approval": true,  "escalation_only": true, "label": "Astra at max effort",    "suited_for": "exceptionally hard, high-impact investigation after Astra at xhigh fell short; diminishing returns and prone to overthinking"}
     ]
   },
   "base_level_by_operation": {
@@ -95,11 +95,11 @@
       "data_analysis":   2,
       "debugging":       3,
       "review":          4,
-      "architecture":    5,
-      "research":        6,
-      "security":        6,
-      "investigation":   9,
-      "long_task":       9
+      "architecture":    4,
+      "research":        5,
+      "security":        5,
+      "investigation":   5,
+      "long_task":       4
     }
   },
   "ceiling_by_operation": {

@@ -154,6 +154,16 @@ class SelectionTest(unittest.TestCase):
         eligible, _ = eligible_candidates(STATE, config, diagnose(STATE, config))
         self.assertEqual(eligible, [])
 
+    def test_ambiguity_gate(self):
+        raw = fixture()
+        raw['hosts']['codex']['candidates'][0]['restrictions'] = {'allow_ambiguous': False}
+        config = for_host(raw, 'codex')
+        eligible, excluded = eligible_candidates(dict(STATE, ambiguous=True), config, diagnose(STATE, config))
+        self.assertEqual([c['id'] for c in eligible], ['deep'])
+        self.assertIn('ambiguous_restricted', excluded[0]['reasons'])
+        eligible, _ = eligible_candidates(STATE, config, diagnose(STATE, config))
+        self.assertEqual([c['id'] for c in eligible], ['basic', 'deep'])
+
     def test_failure_stops_and_safe_retry(self):
         config = for_host(fixture(), 'codex')
         for kind in ('rate_limit', 'permission_denied', 'missing_context', 'unknown'):
@@ -394,7 +404,12 @@ class RegressionMatrixTest(unittest.TestCase):
                         level, _, _, _ = choose_level(state, config, names, 0, ceiling)
                         with patch('route.agents_dir', agents):
                             actual = route_one(state, config, [])
-                        self.assertEqual(actual['agent'], names[level], (host, operation, mask))
+                        excluded = {e['id']: e['reasons'] for e in actual['excluded']}
+                        if names[level] in excluded:
+                            # capability gates override the legacy role; the nearest eligible rung takes the step
+                            self.assertTrue({'ambiguous_restricted', 'critical_restricted'} & set(excluded[names[level]]), (host, operation, mask))
+                        else:
+                            self.assertEqual(actual['agent'], names[level], (host, operation, mask))
 
     def test_context_recovery_requires_confirmation_and_diff(self):
         config = for_host(fixture(), 'codex')

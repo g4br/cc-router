@@ -73,7 +73,7 @@ Candidate fields:
 | `resolved_model` | Optional effective version whose observed results may inform selection |
 | `consumption_tier` | Configured permission ceiling/floor dimension, not model quality |
 | `legacy_rank` | Legacy fallback role, not universal superiority |
-| `restrictions` | Optional `operations`, `max_files`, `allow_critical` |
+| `restrictions` | Optional `operations`, `max_files`, `allow_critical`, `allow_ambiguous` |
 | `escalation_only` | Requires retry or explicit matching user floor |
 | `skills` | Optional override of configured Claude agent skills |
 
@@ -110,7 +110,16 @@ approval/host confirmation. Ineligible entries include structured reasons in
 With insufficient evidence, use the existing operation base plus one for
 `files > file_limit`, ambiguity and criticality, mapped to the nearest eligible
 legacy role. With migrated configuration this preserves the normal heuristic
-choices, except invalid/unsafe states. `policy: legacy` also retains the first
+choices, except invalid/unsafe states.
+
+Model and effort are separate decisions. Each extra rung buys more deliberation, but
+some needs are about the model's capability, and these are restrictions instead:
+the small models (Haiku, Luna) need a well-specified task (`allow_ambiguous: false`),
+and their low-effort rungs skip checks (`allow_critical: false`). An excluded rung
+hands the step to the nearest eligible one. Security stops below Fable
+(`ceiling_by_operation`), whose safeguards can refuse offensive-security work. Max
+effort (Opus, Astra) is `escalation_only`: only a retry or an explicit matching
+`user_floor` reaches it. Base levels per operation match across hosts by difficulty level. `policy: legacy` also retains the first
 eligible Laya score over the transitional threshold. Failure diagnosis and safety
 gates apply even in legacy mode. `escalation_jump` remains parsed and is used only by
 the legacy `limits` helper in `route.py`; v2 diagnoses first and escalates exactly one

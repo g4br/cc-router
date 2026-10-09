@@ -205,15 +205,16 @@ def validate_config(raw):
             c.setdefault('availability', 'unverified')
             require(c['availability'] in ('unverified', 'supported', 'unavailable'), f'{field}.availability')
             c.setdefault('restrictions', {})
-            require(type(c['restrictions']) is dict and set(c['restrictions']) <= {'operations', 'max_files', 'allow_critical'}, f'{field}.restrictions')
+            require(type(c['restrictions']) is dict and set(c['restrictions']) <= {'operations', 'max_files', 'allow_critical', 'allow_ambiguous'}, f'{field}.restrictions')
             r = c['restrictions']
             if 'operations' in r:
                 strings(r['operations'], f'{field}.restrictions.operations')
                 require(set(r['operations']) <= set(OPERATIONS), f'{field}.restrictions.operations')
             if 'max_files' in r:
                 number(r['max_files'], f'{field}.restrictions.max_files', 0, 1000000, True)
-            if 'allow_critical' in r:
-                require(type(r['allow_critical']) is bool, f'{field}.restrictions.allow_critical')
+            for key in ('allow_critical', 'allow_ambiguous'):
+                if key in r:
+                    require(type(r[key]) is bool, f'{field}.restrictions.{key}')
             for key in ('legacy_rank', 'consumption_tier'):
                 c.setdefault(key, index if key == 'legacy_rank' else 0)
                 number(c[key], f'{field}.{key}', 0, 10000, True)

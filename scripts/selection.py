@@ -41,6 +41,8 @@ def eligible_candidates(state, config, diagnosis):
             reasons.append('file_limit')
         if state['critical'] and not r.get('allow_critical', True):
             reasons.append('critical_restricted')
+        if state['ambiguous'] and not r.get('allow_ambiguous', True):
+            reasons.append('ambiguous_restricted')
         if ceiling and c['consumption_tier'] > ceiling['consumption_tier']:
             reasons.append('user_ceiling')
         if floor and c['consumption_tier'] < floor['consumption_tier']:

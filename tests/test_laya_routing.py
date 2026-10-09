@@ -75,7 +75,7 @@ class LayaRoutingTest(unittest.TestCase):
                 self.assertNotIn('user_language', LayaHandler.received['state'])
                 self.assertEqual(LayaHandler.received['state']['description'], 'new task')
                 self.assertEqual(LayaHandler.received['model'], 'english')
-                self.assertIn('clear scope where verification matters',
+                self.assertIn('integration with failures or concurrency',
                               LayaHandler.received['questions']['exec-sol-high']['instructions'])
         finally:
             server.shutdown()

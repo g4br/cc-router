@@ -252,6 +252,7 @@ See [implementation and validation record](references/implementation.md).
 | `scripts/labels_from_history.py` | Difficulty labels (exact and censored) from `history.jsonl` |
 | `scripts/eval_difficulty.py` | Offline evaluation of four difficulty strategies and the Laya gate |
 | `scripts/calibrate_difficulty.py` | Fits the Laya temperature and abstention threshold from labels |
+| `scripts/export_difficulty_dataset.py` | Exports labelled difficulty tasks as Laya fine-tuning JSONL (see the [guide](references/laya.md#fine-tuning)) |
 | `tests/data/difficulty_gold.jsonl` | Gold set to label (format in `tests/data/README.md`) |
 | `references/laya.md` | Public Laya checkpoint setup and decision limits |
 

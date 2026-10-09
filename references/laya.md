@@ -178,3 +178,31 @@ and uses its `laya_min_confidence` instead of the config value; the decision the
 stops routing with `laya calibration: invalid file`. Delete the file to go back.
 laya's own `fit_abstention_thresholds` was not used: it takes raw logits records, not the
 averaged distribution of this mode.
+
+## Fine-tuning
+
+The public checkpoint is zero-shot. Once you have labels, you can fine-tune it on this
+question.
+
+1. Export. `python3 scripts/export_difficulty_dataset.py --operator claude` merges the
+   labelled rows of `tests/data/difficulty_gold.jsonl` with the exact labels from the history
+   (censored ones are ignored), checks every row (level name, English description, known
+   operation), prints the counts (gold, history exact, total, per level) and writes
+   `difficulty-train.jsonl` next to `history.jsonl`. Use `--out` to choose another path outside
+   the skill folder; inside it, the script refuses. With 0 labelled rows it refuses and writes
+   nothing. `--check-laya` also loads the file with `laya.evals.Dataset` (needs `laya`).
+2. Train. Open the official notebook (`laya_finetune_typed_decisions_2xT4_kaggle.ipynb` on
+   Kaggle, or `laya_finetune_typed_decisions_mps.py` on Apple Silicon, both in the
+   [laya repository](https://github.com/NandhaKishorM/laya)) and give it the exported file.
+   Hold some labelled tasks out of training and evaluate on them, not on the training items.
+3. Use the checkpoint. Put the local checkpoint directory in `laya_checkpoint` (a path
+   instead of `english`) in `config/ladder.json`, then restart laya-serve. The router sends
+   this value as `model` in every `/batch` request.
+4. Re-evaluate. Run `python3 scripts/eval_difficulty.py --operator claude` on the held-out
+   gold tasks and check the [gate](#gate) again, then `scripts/calibrate_difficulty.py`.
+
+The notebook is not part of the installed `laya` package, so its dataset reader could not be
+checked here. The export follows the `laya.evals` dataset row of laya 0.3.26: `state`
+(`description`, `operation`), `questions` (the five rotated `choice` questions the router
+asks, options `L1` to `L5`), `expected` (per question, the key of the labelled level) and
+`tags`. If the notebook expects another layout, convert from this file; the labels are the same.

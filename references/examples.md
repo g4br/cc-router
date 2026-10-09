@@ -5,6 +5,12 @@ The following commands work with the existing catalogue for both operators.
 [Archived v1 task examples](legacy-examples.md) are retained as historical material,
 not as current availability, price or capability claims.
 
+For Luna/Sol/Astra programming examples with acceptance criteria and boundaries,
+see [the model use-case catalogue](roteamento_luna_sol_astra_programacao.md#aplicação-no-cc-router).
+Its eight configured profiles feed Laya's `per_candidate` questions. The heuristic
+uses operation and flags; difficulty mode uses five levels rather than these
+individual profiles. The seven hypothetical pairs are not enabled.
+
 ## Equivalent single-step workflows
 
 ```bash

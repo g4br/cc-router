@@ -48,11 +48,17 @@ re-reading unchanged files.
 
 ## Record
 
+Retain the native child ID. After verification, Codex collects its local usage with:
+
 ```bash
-python <skill>/scripts/record.py <decision-id> success <tokens> <seconds> --no-rework true
+python <skill>/scripts/record.py <decision-id> success --agent-id <native-thread-id> --no-rework true
 ```
 
-Omit unknown metrics. On failure record `--failure-kind` and keep `task_id`.
+Claude's installed stop hook collects usage; call `record.py <decision-id> success`
+after verification. Without the hook, use `--agent-id <native-agent-id>`.
+Read [native usage](references/native-usage.md) for setup, explicit transcript paths
+or missing records. Unavailable metrics stay unknown; never copy intended settings
+as effective ones. On failure record `--failure-kind` and keep `task_id`.
 
 ## DAG
 
@@ -69,6 +75,7 @@ python <skill>/scripts/scheduler.py next /tmp/run.json --capacity 2
 - [Protocol](references/protocol.md): approval, retries, escalation, refusal, brief/report, tokens per phase.
 - [Scheduler](references/scheduler.md): completion, ownership re-check, efficiency.
 - [Configuration](references/router-v2.md), [Examples](references/examples.md), [Laya](references/laya.md), [README](README.md) (Claude agents need `scripts/install.py`).
+- [Codex programming use cases](references/roteamento_luna_sol_astra_programacao.md): read when maintaining or evaluating Luna/Sol/Astra profiles; includes acceptance checks, profile boundaries and hypothetical pairs. Normal routing uses the configured profiles without loading this catalogue.
 
 Host detection failures need `CC_ROUTER_OPERATOR=claude|codex`. Never bypass
 restrictions or change credentials for a model. Unknown usage stays unknown.

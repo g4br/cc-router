@@ -47,6 +47,7 @@ def build(task, config):
         f"Acceptance: {task['acceptance'].strip()}",
         f"Verify with: {task['verify'].strip()}",
         f"Report language: {task['user_language']}",
+        f"CC_ROUTER_DECISION: {task['decision_id']}",
         f"Echo STEP: {task.get('step_id') or 'none'} and DECISION: {task['decision_id']} in the report.",
         report_rules(config)])
 

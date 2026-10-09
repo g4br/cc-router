@@ -6,6 +6,7 @@ import subprocess
 from datetime import datetime, timezone
 
 from brief import report_rules
+from usage import configure_claude_hook
 from common import load_config, check_subscription, detect_operator, last_active_rung, find_skill, agents_dir, history_path, settings_file, config_file
 
 #-----------------------------------------------------------
@@ -90,6 +91,7 @@ else:
 
 if operator == 'codex':
     print('Codex uses its native agent tool. No agent files or Claude Code settings are needed.')
+    print('After verification: record.py <decision-id> success --agent-id <native-thread-id> collects local host usage.')
     print(f'History in: {history_path(operator).parent}')
     sys.exit(0)
 
@@ -125,6 +127,10 @@ if type(permissions) is not dict or type(permissions.get('ask', [])) is not list
 other_rules = permissions.get('ask', [])
 approval_rules = [rule for rule in approval_rules if rule not in other_rules]
 permissions['ask'] = other_rules + approval_rules
+
+# A stop hook collects usage only. The orchestrator still verifies and records
+# the outcome. Preserve other hooks and avoid duplicate registrations on reinstall.
+configure_claude_hook(settings)
 
 settings_file.write_text(json.dumps(settings, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
 print(f'Save: {settings_file} (permissions.ask: {approval_rules})')

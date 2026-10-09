@@ -89,6 +89,12 @@ or block them in the next routing request.
    leave them unknown. Host substitution must be disclosed and recorded faithfully.
 8. Record one result per attempt:
 
+   Prefer [native usage collection](native-usage.md): retain the child ID from
+   delegation and use `record.py <decision-id> success --agent-id <native-id>`.
+   Claude's installed stop hook collects automatically; ordinary `record.py`
+   consumes its observation. Collection never replaces the verification in step 7.
+   The manual metrics form remains available when native transcripts are unavailable:
+
    ```bash
    python <skill>/scripts/record.py <decision-id> success 48210 37.5 --no-rework true
    ```

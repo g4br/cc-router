@@ -1,10 +1,12 @@
 import argparse
 import math
+import os
+from pathlib import Path
 from failures import KINDS
 from candidates import string
 from telemetry import PHASES, check_phase_tokens
 
-from common import decision_events, log_event
+from common import decision_events, log_event, load_config, detect_operator, lock_decision
 
 #-----------------------------------------------------------
 # Input and paths
@@ -19,10 +21,13 @@ parser.add_argument('--effective-candidate')
 parser.add_argument('--resolved-model')
 parser.add_argument('--effective-effort')
 parser.add_argument('--host-confirmed', action='store_true')
+parser.add_argument('--agent-id', help='collect usage from this native Codex thread or Claude subagent')
+parser.add_argument('--transcript', type=Path, help='explicit native JSONL path (requires --agent-id)')
+parser.add_argument('--turn-id', help='Codex turn to collect (requires --agent-id)')
 parser.add_argument('--verification', choices=('passed', 'failed', 'unknown'))
 parser.add_argument('--failure-kind', choices=KINDS)
 parser.add_argument('--task-complete', choices=('true', 'false'))
-parser.add_argument('--metric-source', default='host_report')
+parser.add_argument('--metric-source', default=None)
 parser.add_argument('--phase-tokens', nargs='+', metavar='PHASE=N', help='measured tokens per phase (' + ', '.join(PHASES) + '); unlisted phases stay unknown')
 parser.add_argument('--tokens-source', choices=('host', 'estimated'), help='whether the phase tokens come from the host or are estimates')
 for name in ('input', 'output', 'reasoning', 'cache'):
@@ -30,6 +35,36 @@ for name in ('input', 'output', 'reasoning', 'cache'):
 args = parser.parse_args()
 
 decision_id = args.id
+lock_fd = lock_decision(decision_id)
+decision, events = decision_events(decision_id)
+from usage import latest
+from native_usage import collect, locate
+observation = latest(events)
+if (args.transcript or args.turn_id) and not args.agent_id:
+    parser.error('--transcript/--turn-id require --agent-id')
+if args.agent_id:
+    host = detect_operator()
+    collected = collect(host, args.transcript or locate(host, args.agent_id), args.agent_id,
+                        decision_id, load_config(host), args.turn_id,
+                        agent_type=observation['host_usage']['agent_type'] if observation else None)
+    if observation:
+        a, b = observation['host_usage'], collected['host_usage']
+        if (a['agent_id'], a['turn_id']) != (b['agent_id'], b['turn_id']):
+            parser.error('native execution disagrees with previously collected usage')
+    observation = collected
+if observation:
+    manual = ('tokens', 'duration_s', 'effective_candidate', 'resolved_model', 'effective_effort',
+              'metric_source', 'input_tokens', 'output_tokens', 'reasoning_tokens', 'cache_tokens')
+    if args.host_confirmed or any(getattr(args, key) is not None for key in manual):
+        parser.error('native usage cannot be mixed with manual execution metrics')
+    args.host_confirmed = True
+    for key in ('effective_candidate', 'resolved_model', 'effective_effort', 'duration_s'):
+        setattr(args, key, observation[key])
+    for key in ('input_tokens', 'output_tokens', 'reasoning_tokens', 'cache_tokens'):
+        setattr(args, key, observation['metrics'][key])
+    args.tokens = observation['metrics']['total_tokens']
+    args.metric_source = observation['metrics']['source']
+args.metric_source = args.metric_source or 'host_report'
 result = args.result
 tokens = args.tokens
 duration_s = args.duration_s
@@ -73,7 +108,6 @@ if args.task_complete == 'true' and result != 'success':
 # Check decision, justification and approval
 #-----------------------------------------------------------
 # without a logged justification there is no way to audit why the model was used
-decision, events = decision_events(decision_id)
 if decision.get('execution', {}).get('status') == 'blocked':
     raise ValueError('Decision is blocked; resolve the failure before recording execution')
 if no_rework and (decision.get('attempt_count', 1) > 1 or decision.get('state', {}).get('failed_with')):
@@ -98,6 +132,8 @@ log_event({
     'resolved_model': args.resolved_model if args.host_confirmed else None,
     'effective_effort': args.effective_effort if args.host_confirmed else None,
     'host_confirmed': args.host_confirmed,
+    'host_usage': observation['host_usage'] if observation else None,
+    'execution_segments': observation['execution_segments'] if observation else None,
     'verification': verification,
     'failure_kind': args.failure_kind or ('unknown' if result != 'success' else None),
     'task_complete': (result == 'success') if args.task_complete is None else args.task_complete == 'true',
@@ -107,10 +143,12 @@ log_event({
     'task_profile': decision.get('task_profile'),
     'metrics': {'total_tokens': tokens, 'input_tokens': args.input_tokens,
                 'output_tokens': args.output_tokens, 'reasoning_tokens': args.reasoning_tokens,
-                'cache_tokens': args.cache_tokens, 'source': args.metric_source, 'unit': 'tokens'},
+                'cache_tokens': args.cache_tokens,
+                'cache_write_tokens': observation['metrics']['cache_write_tokens'] if observation else None,
+                'source': args.metric_source, 'unit': 'tokens'},
     'phase_tokens': phase_tokens,
     'tokens_source': (args.tokens_source or 'host') if phase_tokens else None,
-    'duration_source': 'host_report' if duration_s is not None else None,
+    'duration_source': observation['duration_source'] if observation else ('host_report' if duration_s is not None else None),
     'duration_unit': 'seconds',
     'id':         decision_id,
     'agent':      decision['agent'],
@@ -120,3 +158,4 @@ log_event({
     'duration_s': duration_s,
 })
 print(f"Logged: {decision_id} {decision['agent']} {result}")
+os.close(lock_fd)

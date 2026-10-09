@@ -77,6 +77,15 @@ Candidate fields:
 | `escalation_only` | Requires retry or explicit matching user floor |
 | `skills` | Optional override of configured Claude agent skills |
 
+The bundled Codex `suited_for` profiles include representative programming tasks,
+observable completion criteria and boundaries between local edits, component work,
+integration and critical invariants. They are derived from the
+[Luna/Sol/Astra use-case catalogue](roteamento_luna_sol_astra_programacao.md#aplicação-no-cc-router).
+Only the eight existing pairs are configured; hypothetical pairs remain examples.
+These descriptions are sent to Laya in `per_candidate` mode and returned with the
+decision. They are advisory profiles, not eligibility restrictions or semantic
+rules for the heuristic/difficulty backend. Availability still needs host evidence.
+
 State inputs are strictly typed and reject unknown fields. `description` is 1–8000
 characters, `files` an integer from 0 to 1,000,000 (booleans rejected), `ambiguous`
 and `critical` exact booleans. Identifiers/language/context have bounded length.
@@ -112,10 +121,12 @@ With insufficient evidence, use the existing operation base plus one for
 legacy role. With migrated configuration this preserves the normal heuristic
 choices, except invalid/unsafe states.
 
-Model and effort are separate decisions. Each extra rung buys more deliberation, but
-some needs are about the model's capability, and these are restrictions instead:
+Model and effort are separate decisions. More effort within a model allocates more
+deliberation; a ladder rung can also change the model and does not guarantee better
+results. Some needs are represented by eligibility restrictions instead:
 the small models (Haiku, Luna) need a well-specified task (`allow_ambiguous: false`),
-and their low-effort rungs skip checks (`allow_critical: false`). An excluded rung
+and their low-effort rungs exclude critical tasks (`allow_critical: false`); cheap
+verification is still required. An excluded rung
 hands the step to the nearest eligible one. Security stops below Fable
 (`ceiling_by_operation`), whose safeguards can refuse offensive-security work. Max
 effort (Opus, Astra) is `escalation_only`: only a retry or an explicit matching
@@ -174,6 +185,12 @@ rework and completion status. Absent values are null. `justify.py`, `record.py` 
 but cannot stand in for measured successful completions.
 
 `--host-confirmed` asserts that effective fields came from the native host.
+Alternatively, [native usage collection](native-usage.md) reads the dedicated
+child transcript, normalizes counters and sets effective fields with provenance.
+Claude's stop hook stores a separate `host_usage` event; `record.py` consumes it
+only when the orchestrator records the verified outcome. Codex uses the returned
+native child ID with `record.py --agent-id`. Neither path assumes the proposal was
+applied. Mixed Claude executions retain per-model/effort `execution_segments`.
 Reporting only intended settings is insufficient. `--input-tokens`, `--output-tokens`,
 `--reasoning-tokens`, `--cache-tokens` are optional; reasoning is a subset of output,
 cache a subset of input, and total = input + output when both are reported. Never

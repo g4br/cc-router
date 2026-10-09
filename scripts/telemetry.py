@@ -211,7 +211,14 @@ def segmented_report(events):
             key: None for key in ('planning', 'classification', 'delegation', 'validation')}
         done = {e['task_id'] for e in run_events if e.get('event') == 'task_completed'}
         workflows.append({'run_id': run_id, **workflow_efficiency(events, start['task_ids'], len(done), overhead)})
-    return {'summary': summarize(events), 'segments': segments, 'workflows': workflows}
+    # Mixed-model executions retain each native segment instead of attributing
+    # the whole attempt to the intended candidate. This is a breakdown only;
+    # attempt/workflow totals above already include these tokens exactly once.
+    native = [{'decision_id': r['decision']['id'], 'host': r['operator'],
+               'execution': r['result']['host_usage'], 'segments': r['result']['execution_segments']}
+              for r in rows if r['result'].get('host_usage') and r['result'].get('execution_segments')]
+    return {'summary': summarize(events), 'segments': segments, 'workflows': workflows,
+            'native_executions': native}
 
 
 if __name__ == '__main__':

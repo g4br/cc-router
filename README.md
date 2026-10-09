@@ -258,6 +258,17 @@ See [implementation and validation record](references/implementation.md).
 
 History lives in `~/.claude/cc-router/history.jsonl` or `~/.codex/cc-router/history.jsonl`, according to the detected operator.
 
+## Native usage collection
+
+Codex: after verification, `python scripts/record.py <decision-id> success
+--agent-id <native-thread-id>` reads the child's local rollout. Claude Code:
+re-run `scripts/install.py` to register the usage-only `SubagentStop` hook; then
+the ordinary result command consumes its measurements after verification.
+
+Both adapters record host-reported model/effort and normalized tokens, deduplicate
+streaming counters and retain unknown fields as null. They never infer actual usage
+from the routing proposal. See [setup, formats and limitations](references/native-usage.md).
+
 ## License
 
 MIT

@@ -13,6 +13,7 @@ from pathlib import Path
 from datetime import datetime
 import uuid
 import fcntl
+import re
 from urllib.request import Request, build_opener, HTTPRedirectHandler, ProxyHandler
 from candidates import for_host
 
@@ -115,6 +116,21 @@ def decision_events(decision_id, operator=None):
     decisions = [e for e in same_id if e['event'] == 'decision']
     if not decisions: raise ValueError(f'No decision with id {decision_id} in {history_file}')
     return decisions[0], same_id
+
+
+def lock_decision(decision_id, operator=None):
+    """Serialize collection/recording for one attempt; caller closes the fd.
+
+    Different agents remain concurrent. The history append lock alone cannot
+    protect a read-check-append sequence from duplicate results.
+    """
+    if not isinstance(decision_id, str) or not re.fullmatch(r'[a-zA-Z0-9_-]{1,128}', decision_id):
+        raise ValueError('decision_id: invalid identifier')
+    directory = history_path(operator or detect_operator()).parent / 'locks'
+    directory.mkdir(parents=True, exist_ok=True)
+    fd = os.open(directory / (decision_id + '.lock'), os.O_CREAT | os.O_RDWR, 0o600)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    return fd
 
 def read_history(path):
     if not path.exists():

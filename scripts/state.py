@@ -12,7 +12,7 @@ def check_state(state, config):
         'policy', 'task_id', 'attempt_count', 'failure_kind', 'idempotent', 'retry_approved',
         'diff_verified', 'blocked_candidates', 'allowed_candidates', 'required_capabilities',
         'recovery_confirmed', 'context_class', 'step_id', 'depends_on', 'read_targets', 'write_targets', 'shared_resources',
-        'isolation', 'project_root', 'outside_root_approved', 'host_max_parallel'}
+        'isolation', 'project_root', 'outside_root_approved', 'host_max_parallel', 'same_level_retries'}
     require(set(state) <= known, 'state', 'unknown fields')
     string(state['description'], 'description', 8000)
     string(state['operation'], 'operation', 100)
@@ -42,6 +42,8 @@ def check_state(state, config):
         require(bool(state['allowed_candidates']), 'allowed_candidates', 'empty allowlist')
     if 'attempt_count' in state:
         number(state['attempt_count'], 'attempt_count', 1, 10000, True)
+    if 'same_level_retries' in state:
+        number(state['same_level_retries'], 'same_level_retries', 0, 10000, True)
     if 'host_max_parallel' in state:
         number(state['host_max_parallel'], 'host_max_parallel', 1, 10000, True)
     if 'policy' in state:

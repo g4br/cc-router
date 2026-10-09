@@ -5,6 +5,7 @@ import argparse
 import subprocess
 from datetime import datetime, timezone
 
+from brief import report_rules
 from common import load_config, check_subscription, detect_operator, last_active_rung, find_skill, agents_dir, history_path, settings_file, config_file
 
 #-----------------------------------------------------------
@@ -34,18 +35,11 @@ The delegation prompt gives the goal of the step, the context you need and the v
 
 - Do only the requested step, without widening the scope.
 - Before reporting, verify the result against the given criterion: run the script or the test, validate the output, check the file. A syntax-only check, or a check command that failed to start, does not count; if only the project's declared dependencies are missing, install them with its own package manager. If no real check can run here, say which one you did not run and why instead of reporting the step as done.
-- Write the report in the user's language given in the delegation prompt. Keep RESULT, DONE, VERIFICATION, PENDING, STEP and DECISION as literal report labels. Use any explicitly requested language for the deliverable itself.
-- If the step is too ambiguous, essential context is missing, or it needs more reasoning than you can safely deliver, stop and answer with RESULT: ESCALATE and the reason. Handing back early costs less than delivering it wrong, and the orchestrator will pass the step to a more capable configuration.
+- Write the report in the user's language given in the delegation prompt. Keep the report labels literal. Use any explicitly requested language for the deliverable itself.
+- If the step is too ambiguous, essential context is missing, or it needs more reasoning than you can safely deliver, stop and answer with RESULT: blocked and the reason in PENDING. Handing back early costs less than delivering it wrong, and the orchestrator will pass the step to a more capable configuration.
 
 {lean_block}
-Always end with this report:
-
-RESULT: done | partial | ESCALATE
-DONE: what was changed or produced
-VERIFICATION: how you checked it and what you saw
-PENDING: what was left out, or "none"
-STEP: the step_id from the delegation prompt, or "none"
-DECISION: the decision_id from the delegation prompt, or "none"
+Always end with this report. {report_rules}
 '''
 #-----------------------------------------------------------
 # Build one agent per ladder rung
@@ -159,7 +153,7 @@ for rung in config['ladder']:
     effort_line = f"effort: {rung['effort']}\n" if rung['effort'] else ''
     if agent_file.exists() and 'cc-router executor (' not in agent_file.read_text(encoding='utf-8'):
         raise ValueError('agent: refusing to overwrite an unowned file')
-    text = agent_template.format(description_yaml=json.dumps(f"cc-router executor ({rung['label']}). Use only when route.py selects this agent."), effort_line=effort_line, skills_lines=skills_lines, lean_block=lean_block, **rung)
+    text = agent_template.format(description_yaml=json.dumps(f"cc-router executor ({rung['label']}). Use only when route.py selects this agent."), effort_line=effort_line, skills_lines=skills_lines, lean_block=lean_block, report_rules=report_rules(config), **rung)
     agent_file.write_text(text, encoding='utf-8')
     print(f'Save: {agent_file}')
 

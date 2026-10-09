@@ -240,7 +240,9 @@ See [implementation and validation record](references/implementation.md).
 | `references/scheduler.md`, `protocol.md` | On-demand orchestration and execution details |
 | `scripts/planning.py`, `verify_batch.py` | Dependency waves and actual-change ownership checks |
 | `scripts/migrate.py`, `benchmark.py` | Explicit migration/backup and reproducible offline comparison |
-| `scripts/justify.py` | Logs the justification and the user's answer |
+| `scripts/justify.py` | Logs the router's own reason and the user's answer |
+| `scripts/brief.py` | Prints the fixed delegation brief and report format for one task |
+| `scripts/report_tokens.py` | Median and p90 tokens per completed task, by backend, level and phase |
 | `scripts/record.py` | Logs the step's result |
 | `scripts/feedback.py` | Corrects a no-rework label discovered after recording |
 | `scripts/laya_device.py` | Checks which GPU can run PyTorch, with CPU fallback |

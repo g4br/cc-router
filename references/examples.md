@@ -21,9 +21,9 @@ Set `CC_ROUTER_OPERATOR` consistently on the following helper commands if the ho
 cannot be detected. Replace placeholders with actual returned IDs:
 
 ```bash
-CC_ROUTER_OPERATOR=codex python scripts/justify.py <decision-id> auto 'Quoted fields require verified parser behavior; the chosen profile fits this scope'
+CC_ROUTER_OPERATOR=codex python scripts/justify.py <decision-id> auto
 CC_ROUTER_OPERATOR=codex python scripts/record.py <decision-id> success --no-rework true
-CC_ROUTER_OPERATOR=claude python scripts/justify.py <decision-id> auto 'Quoted fields require verified parser behavior; the chosen profile fits this scope'
+CC_ROUTER_OPERATOR=claude python scripts/justify.py <decision-id> auto
 CC_ROUTER_OPERATOR=claude python scripts/record.py <decision-id> success --no-rework true
 ```
 
@@ -43,8 +43,8 @@ If `needs_approval` is true, present the reason and permitted alternative in the
 user's language and wait. After an actual answer:
 
 ```bash
-python scripts/justify.py <decision-id> approved 'User approved this candidate for the stated task'
-python scripts/justify.py <other-decision-id> declined 'User selected the permitted alternative'
+python scripts/justify.py <decision-id> approved
+python scripts/justify.py <other-decision-id> declined
 ```
 
 A declined decision cannot receive a result or later approval. Re-route using its

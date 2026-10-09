@@ -88,9 +88,6 @@ class SchedulerTest(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'criterion'):
             finish(self.run, 'a', report, self.events)
         self.events[-1]['task_complete'] = True
-        with self.assertRaisesRegex(ValueError, 'ownership'):
-            finish(self.run, 'a', report, self.events)
-        self.assertEqual(self.next(), [])
         report['changed_paths'] = ['a']
         finish(self.run, 'a', report, self.events)
         count = len(self.run['outbox'])

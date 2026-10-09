@@ -37,6 +37,11 @@ outstanding reservations. It does not know other runs' reservations; one main
 orchestrator must allocate host capacity across runs.
 In Laya difficulty mode, `next` sends all tasks it routes in that cycle in one
 batch request (at most 64 per request).
+`next` never dispatches two tasks whose reads, writes or shared resources overlap in
+the same cycle or while one is reserved: the later one waits for the earlier to
+finish instead of erroring the run. Unordered overlaps that the plan cannot serialise
+(no dependency, no `sequential` isolation) are rejected at `init` before any
+reservation. While a task is in `RECHECK` (below), `next` dispatches nothing.
 
 The response separates `dispatch` (new reservations) from `reserved` (outstanding
 ones, IDs only except in `status`) and `tasks` (statuses). **Execute only newly dispatched tasks.** Follow
@@ -88,7 +93,19 @@ Use actual returned IDs and actual metrics; omit unavailable numbers.
 recorded outcome, passed verification, complete task criterion and declared path
 ownership. It does **not** run tests or prove that a caller-provided report is true.
 Read-only tasks report `changed_paths: []`. False or premature success reports
-must not be used to release dependencies.
+must not be used to release dependencies. `changed_paths` is the actual change list
+for this task, for example from `git diff --name-only` plus untracked files.
+
+Optional `finish` fields: `phase_tokens` (measured phases only, see
+[the protocol](protocol.md#tokens-per-phase)) with `tokens_source` (`host` or
+`estimated`), copied into `task_completed`.
+
+**Out-of-ownership changes.** If `changed_paths` has files outside `write_targets`,
+`finish` does not fail the task and does not count rework: the task moves to
+`RECHECK`, `status` lists the stray paths under `recheck`, a `task_recheck` event is
+logged, dependents stay blocked and `next` starts nothing. Review those paths
+serially (diff, conflicts with other tasks), then send `finish` again with the
+actual report plus `"recheck": "<what was reviewed>"` to complete the task.
 
 A verified completion emits `task_completed`, moves to `DONE` and releases only
 its dependents. There is no global wave barrier: a short branch can release its

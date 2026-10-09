@@ -368,3 +368,20 @@ Missing for per-phase accounting:
 7. **Baseline:** the existing benchmark does not involve Laya. A Laya-quality
    baseline needs a new labelled offline set. The current history cannot
    provide one (42 results, all v1, censored).
+
+## Phase 4 sizes
+
+`SKILL.md` is loaded on every invocation. Words by `wc -w`; characters by `len()`;
+estimated tokens = characters / 4.
+
+| | Words | Characters | Est. tokens |
+|---|---|---|---|
+| Before (commit 60987fe) | 526 | 4,359 | 1,090 |
+| After | 352 | 3,097 | 774 |
+
+Moved out of `SKILL.md` into `references/protocol.md` and `references/scheduler.md`:
+retry and recovery rules, the DAG dispatch and completion details, the efficiency
+definition, the conditional-reference descriptions. What stays: the Laya check, the
+single-task route, delegation with `brief.py`, `record.py`, the DAG pointer and the
+conditional references. Executor system prompts grow by the fixed report format
+(about 52 words per generated agent), in exchange for shorter replies.

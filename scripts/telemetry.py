@@ -3,6 +3,19 @@ import math
 from statistics import mean, median
 
 
+PHASES = ('planning', 'classification', 'delegation', 'execution', 'validation', 'rework')
+
+
+def check_phase_tokens(values):
+    """Optional per-phase tokens: only measured phases appear; an absent phase is unknown, never zero."""
+    if type(values) is not dict or not values or not set(values) <= set(PHASES):
+        raise ValueError(f'phase_tokens: expected a nonempty object over {PHASES}')
+    for phase, value in values.items():
+        if type(value) is not int or value < 0:
+            raise ValueError(f'phase_tokens.{phase}: expected a nonnegative integer')
+    return values
+
+
 def profile(state, file_limit=3):
     return {'operation': state.get('operation'), 'files_bucket': 'many' if state.get('files', 0) > file_limit else str(state.get('files', 0)),
             'ambiguous': state.get('ambiguous'), 'critical': state.get('critical'),

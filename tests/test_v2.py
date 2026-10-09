@@ -328,6 +328,7 @@ class AdditionalContractsTest(unittest.TestCase):
             self.assertIn('Agent(exec-other-skill)', current['permissions']['ask'])
             self.assertIn('Agent(deep)', current['permissions']['ask'])
             self.assertNotIn('effort:', (agents / 'basic.md').read_text())
+            self.assertIn('FILES: <changed paths>', (agents / 'basic.md').read_text())
             self.assertIn('effort: custom', (agents / 'deep.md').read_text())
 
     def test_append_after_interrupted_line_preserves_next_event(self):

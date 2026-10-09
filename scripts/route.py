@@ -178,7 +178,7 @@ def alternative_without_approval(ladder, floor, level):
 
 from common import read_history
 from failures import diagnose
-from selection import eligible_candidates, select, needs_approval
+from selection import eligible_candidates, select, needs_approval, escalation_step, level_name
 from telemetry import profile, estimates
 import difficulty
 
@@ -264,6 +264,15 @@ def route_one(state, config, events, batch_id=None, answer=UNSET):
                                  f"heuristic={laya['heuristic_level']}: {laya['combination']} -> {laya['final_level']}")
     if scores and not any(s >= config['success_threshold'] for s in scores.values()):
         backend = 'laya (no opinion)'
+    step = escalation_step(state, config, eligible, diagnosis)
+    escalation = None
+    if step:
+        # the training label for the fine-tuning phase: where the failure sent the task
+        failed = next(c for c in config['ladder'] if state['failed_with'] in (c['id'], c['agent']))
+        chosen = step
+        escalation = {'kind': diagnosis['kind'], 'from_candidate': failed['id'], 'to_candidate': chosen['id'],
+                      'from_level': level_name(failed, config), 'to_level': level_name(chosen, config)}
+        selection_reasons.append(f"escalated one level after {diagnosis['kind']}: {failed['id']} -> {chosen['id']}")
     if config['operator'] == 'claude' and not (agents_dir / f"{chosen['agent']}.md").exists():
         raise FileNotFoundError('Agent is not installed. Run scripts/install.py for Claude Code')
     alternatives = [c for c in eligible if c['id'] != chosen['id']]
@@ -282,6 +291,7 @@ def route_one(state, config, events, batch_id=None, answer=UNSET):
                   reason='; '.join(reasons + selection_reasons), evidence=evidence, objectives=objectives,
                   scores=scores, score_kind='uncalibrated' if scores else None,
                   **({'laya': laya} if laya else {}),
+                  **({'escalation': escalation} if escalation else {}),
                   billing_mode=chosen['billing_mode'],
                   execution={'mode': 'native', 'status': 'requires_host_confirmation', 'applied': False,
                              'effective_candidate': None, 'resolved_model': None, 'effective_effort': None,
@@ -318,6 +328,13 @@ def link_task(state, events, config):
         if state.get('attempt_count', len(results)) != len(results):
             raise ValueError('attempt_count: disagrees with task history')
         state['attempt_count'] = len(results)
+        # consecutive attempts that ended on the same candidate: environment failures retry there, up to a limit
+        streak = 0
+        for result in reversed(results):
+            if next(p for p in prior if p['id'] == result['id']).get('selected') != decision['selected']:
+                break
+            streak += 1
+        state['same_level_retries'] = streak - 1
     check_state(state, config)
 
 

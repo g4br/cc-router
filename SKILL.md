@@ -5,14 +5,9 @@ description: Route substantial tasks to available Claude Code or Codex subagents
 
 # cc-router
 
-Keep orchestration cheaper than the work it saves. Do trivial reads/edits directly.
-For complex work, plan tasks, dependencies, ownership and acceptance checks; select
-models only when tasks become ready. Follow host/project permissions: this skill
-grants no delegation, model overrides or additional authorization.
-
-Python reads configuration, catalogue and history. **Do not load references by
-default.** Use short English `description` values for Laya, `user_language` for
-reports, and only relevant context/artifact references for delegation.
+Do trivial reads/edits directly. Delegate only substantial work, and only where the
+host permits it: this skill grants no delegation, model override or authorization.
+Do not load references unless a step below says so.
 
 ## Before routing
 
@@ -20,67 +15,60 @@ reports, and only relevant context/artifact references for delegation.
 bash <skill>/scripts/start_services.sh --check
 ```
 
-Exit 0 means Laya is up. Otherwise ask the user whether to start it and wait for
-the answer; on yes run `bash <skill>/scripts/start_services.sh` (the first run
-downloads the checkpoint; relay its output). On no, continue: routing falls back
-to the heuristic. Never start Laya without that answer.
+Exit 0 means Laya is up. Otherwise ask the user whether to start it and wait; on yes
+run `bash <skill>/scripts/start_services.sh`. On no, continue with the heuristic.
+Never start Laya without that answer.
 
 ## Single task
+
+Write one short English `description` (goal and acceptance criterion, no secrets),
+then take the router's answer. Do not reason about, weigh or justify model or effort.
 
 ```bash
 python <skill>/scripts/route.py --compact '{"description":"Implement parser and verify roundtrip tests","operation":"implementation","files":2,"ambiguous":false,"critical":false}'
 python <skill>/scripts/justify.py <decision-id> auto
 ```
 
-Use the skill's absolute path. Check `execution.status`, `failure` and
-`needs_approval`. Blocked choices cannot execute. Use `auto` only without required
-approval; otherwise honor existing sufficient authorization or ask and wait, then
-record `approved`/`declined`. Structured reasons stay in the audit log; ordinary
-progress needs only `[T2] model / effort — Executando`.
+Use the skill's absolute path. Blocked choices cannot execute. Use `auto` only when
+`needs_approval` is false; otherwise honor existing sufficient authorization or ask
+the user and wait, then record `approved`/`declined`. `justify.py` stores the
+router's own reason: write none.
 
-Delegate through native tools with goal, relevant context, permitted paths,
-language, acceptance criterion, `decision_id` and (in a DAG) `step_id`; the
-executor echoes them as `STEP`/`DECISION` so completions map back to the run. Claude uses returned `agent` as `subagent_type`;
-Codex uses model/effort only if the tool permits them. `applied: false` is a proposal.
-Verify actual diffs and acceptance checks, then record each attempt:
+## Delegate
+
+```bash
+python <skill>/scripts/brief.py '{"goal":"...","write_targets":["a.py"],"acceptance":"...","verify":"...","user_language":"pt-BR","decision_id":"<id>"}'
+```
+
+Send the printed brief as the whole prompt, with no conversation history, to the
+returned `agent` (Claude: `subagent_type`; Codex: model/effort only if the tool
+permits). The executor answers in the fixed `RESULT/FILES/CHECK/PENDING/TOKENS`
+format plus `STEP`/`DECISION`. Verify by diff and by re-running `CHECK`, not by
+re-reading unchanged files.
+
+## Record
 
 ```bash
 python <skill>/scripts/record.py <decision-id> success <tokens> <seconds> --no-rework true
 ```
 
-Omit unknown metrics. `--no-rework true` means first attempt without corrections.
-On failure, record `--failure-kind` and preserve `task_id`. Read
-[protocol](references/protocol.md) for retries, refusal, host confirmation or
-credential details. Never bypass restrictions or change credentials for a model.
+Omit unknown metrics. On failure record `--failure-kind` and keep `task_id`.
 
-## DAG orchestration
+## DAG
 
-Read [scheduler usage](references/scheduler.md) only when a DAG is needed. Tasks
-add `step_id`, `depends_on`, `write_targets` (`[]` for read-only) and `acceptance`;
-declare relevant read paths/shared resources too.
+Read [scheduler](references/scheduler.md) only when a DAG is needed: tasks add
+`step_id`, `depends_on`, `write_targets` and `acceptance`.
 
 ```bash
 python <skill>/scripts/scheduler.py init /tmp/run.json /tmp/tasks.json
 python <skill>/scripts/scheduler.py next /tmp/run.json --capacity 2
 ```
 
-Only `dispatch` contains new reservations. Apply approval checks per task and launch
-independent reservations together. Use native completion events: validate, record,
-send `finish`, then call `next` with currently free host capacity. Python releases
-dependents only after verified `DONE`. No LLM watcher or model-driven polling.
-Use `status` to recover; reconcile outstanding agents before any replay.
-The scheduler hands off execution to native tools; it does not launch a Codex CLI.
+## References (read only when needed)
 
-## Conditional references
+- [Protocol](references/protocol.md): approval, retries, escalation, refusal, brief/report, tokens per phase.
+- [Scheduler](references/scheduler.md): completion, ownership re-check, efficiency.
+- [Configuration](references/router-v2.md), [Examples](references/examples.md), [Laya](references/laya.md), [README](README.md) (Claude agents need `scripts/install.py`).
 
-- [Scheduler](references/scheduler.md): completion, retries, context updates and
-  efficiency = validated tasks / all workflow tokens, including overhead/rework.
-- [Protocol](references/protocol.md): execution and recovery details.
-- [Configuration](references/router-v2.md): catalogue, policy, migration and audit.
-- [Examples](references/examples.md): extra commands.
-- [Laya](references/laya.md): optional classifier setup/troubleshooting.
-- [README](README.md): installation; Claude agents need `scripts/install.py`.
-
-Missing/conflicting host detection needs `CC_ROUTER_OPERATOR=claude|codex`.
-Model names never imply availability/billing. Unknown usage stays unknown;
-do not claim savings from subagent tokens alone or invent measurements.
+Host detection failures need `CC_ROUTER_OPERATOR=claude|codex`. Never bypass
+restrictions or change credentials for a model. Unknown usage stays unknown.

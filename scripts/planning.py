@@ -75,7 +75,7 @@ def verify_changes(states, changes):
     """Compare host-reported actual changes to declared ownership after execution."""
     ids = [s.get('step_id', f'step-{i+1}') for i, s in enumerate(states)]
     require(type(changes) is dict and set(changes) <= set(ids), 'actual_changes', 'unknown step')
-    actual, unexpected = {}, []
+    actual, unexpected, outside = {}, [], {}
     from candidates import strings
     for ident, state in zip(ids, states):
         values = changes.get(ident, [])
@@ -83,10 +83,12 @@ def verify_changes(states, changes):
         root = Path(state.get('project_root', '.')).resolve()
         actual[ident] = [(root / v).resolve() for v in values]
         declared = paths(state, 'write')
-        if any(not any(p == d or d in p.parents for d in declared) for p in actual[ident]):
+        out = [v for v, p in zip(values, actual[ident]) if not any(p == d or d in p.parents for d in declared)]
+        if out:
             unexpected.append(ident)
+            outside[ident] = out
     collisions = [{'steps': [a, b]} for i, a in enumerate(ids) for b in ids[i+1:]
                   if any(overlap(x, y) for x in actual[a] for y in actual[b])]
-    return {'unexpected_steps': unexpected, 'conflicts': collisions,
+    return {'unexpected_steps': unexpected, 'outside_paths': outside, 'conflicts': collisions,
             'changes_report_complete': set(changes) == set(ids),
             'integration_verification_required': True}

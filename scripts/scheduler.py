@@ -16,11 +16,11 @@ import uuid
 
 from candidates import require, string, number
 from common import detect_operator, check_subscription, load_config, history_path, read_history, log_event
-from planning import plan, verify_changes
+from planning import plan, verify_changes, conflicts
 from difficulty import MAX_STATES
 from route import route_one, link_task, compact, decision_record, difficulty_active, difficulty_answers, UNSET
 from state import check_state
-from telemetry import workflow_efficiency
+from telemetry import workflow_efficiency, check_phase_tokens
 
 OVERHEAD = ('planning', 'classification', 'delegation', 'validation')
 
@@ -42,7 +42,7 @@ def initialize(payload, config):
         acceptance = state.pop('acceptance', None)
         string(acceptance, 'acceptance', 2000)
         require('step_id' in state, 'step_id', 'required for scheduler tasks')
-        require(not any(k in state for k in ('task_id', 'failed_with', 'attempt_count', 'failure_kind')),
+        require(not any(k in state for k in ('task_id', 'failed_with', 'attempt_count', 'failure_kind', 'same_level_retries')),
                 'task', 'new plans cannot import attempt identities')
         state['project_root'] = str(Path(state.get('project_root', '.')).resolve())
         state['task_id'] = uuid.uuid4().hex
@@ -69,6 +69,8 @@ def reserve(run, config, events, capacity):
     dispatch = []
     if any(t['state'].get('isolation') == 'sequential' for t in active):
         return dispatch
+    if any(t['status'] == 'RECHECK' for t in tasks.values()):
+        return dispatch  # out-of-ownership changes are re-checked serially, before anything new starts
     while slots > 0:
         # Gather the next ready tasks, then route them with one Laya request (a blocked task frees its slot: gather again).
         picked = []
@@ -77,6 +79,10 @@ def reserve(run, config, events, capacity):
                 continue
             dependencies = task['state'].get('depends_on', [])
             if not all(tasks[d]['status'] == 'DONE' for d in dependencies):
+                continue
+            # a collision waits for the earlier task to finish; it never errors the run
+            busy = [t['state'] for t in tasks.values() if t['status'] == 'RESERVED'] + [p[2] for p in picked]
+            if any(conflicts(task['state'], other) for other in busy):
                 continue
             serial = task['state'].get('isolation') == 'sequential'
             if serial and (active or dispatch or picked):
@@ -121,7 +127,8 @@ def reserve(run, config, events, capacity):
 def finish(run, step_id, report, events):
     require(step_id in run['tasks'], 'step_id', 'unknown task')
     task = run['tasks'][step_id]
-    require(type(report) is dict and set(report) <= {'decision_id', 'changed_paths', 'evidence', 'output_ref'},
+    require(type(report) is dict and set(report) <= {'decision_id', 'changed_paths', 'evidence', 'output_ref',
+                                                      'phase_tokens', 'tokens_source', 'recheck'},
             'report', 'unknown fields')
     decision = task['decision']
     require(decision is not None and report.get('decision_id') == decision['id'],
@@ -129,7 +136,11 @@ def finish(run, step_id, report, events):
     if task['status'] in ('DONE', 'FAILED'):
         require(task.get('report') == report, 'report', 'completion already recorded differently')
         return  # At-least-once delivery is safe; no duplicate completion.
-    require(task['status'] == 'RESERVED', 'task', 'not reserved')
+    if task['status'] == 'RECHECK' and task.get('report') == report:
+        return  # same report again: still waiting for the serial re-check
+    require(task['status'] in ('RESERVED', 'RECHECK'), 'task', 'not reserved')
+    require('recheck' not in report or task['status'] == 'RECHECK', 'recheck', 'no pending re-check')
+    require(task['status'] != 'RECHECK' or 'recheck' in report, 'recheck', 'serial re-check evidence required')
     results = [e for e in events if e.get('event') == 'result' and e['id'] == decision['id']]
     require(len(results) == 1, 'result', 'record exactly one host outcome with record.py first')
     result = results[0]
@@ -139,14 +150,26 @@ def finish(run, step_id, report, events):
         string(report.get('evidence'), 'evidence', 2000)
         string(report.get('output_ref'), 'output_ref', 512)
         require('changed_paths' in report, 'changed_paths', 'actual changes required; [] for read-only')
-        ownership = verify_changes([task['state']], {step_id: report['changed_paths']})
-        require(not ownership['unexpected_steps'], 'changed_paths', 'changes outside declared ownership')
+        if 'phase_tokens' in report:
+            check_phase_tokens(report['phase_tokens'])
+        require(report.get('tokens_source', 'host') in ('host', 'estimated'), 'tokens_source')
+        outside = verify_changes([task['state']], {step_id: report['changed_paths']})['outside_paths'].get(step_id, [])
+        if outside and 'recheck' not in report:
+            # not rework: the work may be right, but it touched files it did not own
+            task.update(status='RECHECK', outside=outside, report=report)
+            emit(run, 'task_recheck', step_id=step_id, task_id=task['state']['task_id'],
+                 decision_id=decision['id'], outside_paths=outside)
+            return
+        if 'recheck' in report:
+            string(report['recheck'], 'recheck', 2000)
         task['status'], task['output_ref'] = 'DONE', report['output_ref']
     else:
         task['status'] = 'FAILED'
     task['report'] = report
     emit(run, 'task_completed' if task['status'] == 'DONE' else 'task_failed',
-         step_id=step_id, task_id=task['state']['task_id'], decision_id=decision['id'])
+         step_id=step_id, task_id=task['state']['task_id'], decision_id=decision['id'],
+         **({'phase_tokens': report['phase_tokens'], 'tokens_source': report.get('tokens_source', 'host')}
+            if 'phase_tokens' in report else {}))
 
 
 def revise(run, step_id, patch, config, events, retry=False):
@@ -166,7 +189,7 @@ def revise(run, step_id, patch, config, events, retry=False):
     require(type(patch) is dict and set(patch) <= allowed, 'update', 'unsupported fields')
     state = copy.deepcopy(task['state'])
     # Recovery attestations expire with each attempt; never reuse an old diff approval.
-    for key in ('diff_verified', 'retry_approved', 'recovery_confirmed', 'failure_kind', 'failed_with', 'attempt_count'):
+    for key in ('diff_verified', 'retry_approved', 'recovery_confirmed', 'failure_kind', 'failed_with', 'attempt_count', 'same_level_retries'):
         state.pop(key, None)
     state.update(patch)
     if retry:
@@ -188,8 +211,10 @@ def usage(run, values):
 
 def status(run, events, recover=False):
     tasks = run['tasks']
+    outside = {k: t['outside'] for k, t in tasks.items() if t['status'] == 'RECHECK'}
     return {'run_id': run['id'], 'complete': all(t['status'] == 'DONE' for t in tasks.values()),
             'tasks': {k: t['status'] for k, t in tasks.items()},
+            **({'recheck': outside} if outside else {}),
             'reserved': {k: compact(t['decision']) if recover or t['status'] == 'BLOCKED' else t['decision']['id']
                          for k, t in tasks.items() if t['status'] in ('RESERVED', 'BLOCKED')},
             'routing_seconds': run['routing_seconds'],

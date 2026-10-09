@@ -2,6 +2,7 @@ import argparse
 import math
 from failures import KINDS
 from candidates import string
+from telemetry import PHASES, check_phase_tokens
 
 from common import decision_events, log_event
 
@@ -22,6 +23,8 @@ parser.add_argument('--verification', choices=('passed', 'failed', 'unknown'))
 parser.add_argument('--failure-kind', choices=KINDS)
 parser.add_argument('--task-complete', choices=('true', 'false'))
 parser.add_argument('--metric-source', default='host_report')
+parser.add_argument('--phase-tokens', nargs='+', metavar='PHASE=N', help='measured tokens per phase (' + ', '.join(PHASES) + '); unlisted phases stay unknown')
+parser.add_argument('--tokens-source', choices=('host', 'estimated'), help='whether the phase tokens come from the host or are estimates')
 for name in ('input', 'output', 'reasoning', 'cache'):
     parser.add_argument(f'--{name}-tokens', type=int)
 args = parser.parse_args()
@@ -30,6 +33,16 @@ decision_id = args.id
 result = args.result
 tokens = args.tokens
 duration_s = args.duration_s
+phase_tokens = None
+if args.phase_tokens:
+    try:
+        pairs = [item.partition('=') for item in args.phase_tokens]
+        if any(not sep or not value.lstrip('-').isdigit() for _, sep, value in pairs) or len({k for k, _, _ in pairs}) != len(pairs):
+            raise ValueError('phase_tokens: expected unique PHASE=N pairs')
+        phase_tokens = check_phase_tokens({k: int(v) for k, _, v in pairs})
+    except ValueError as error:
+        parser.error(str(error))
+if args.tokens_source and not phase_tokens: parser.error('--tokens-source requires --phase-tokens')
 no_rework = None if args.no_rework is None else args.no_rework == 'true'
 if tokens is not None and tokens < 0: parser.error('tokens must be nonnegative')
 if duration_s is not None and (not math.isfinite(duration_s) or duration_s < 0): parser.error('duration_s must be nonnegative')
@@ -95,6 +108,8 @@ log_event({
     'metrics': {'total_tokens': tokens, 'input_tokens': args.input_tokens,
                 'output_tokens': args.output_tokens, 'reasoning_tokens': args.reasoning_tokens,
                 'cache_tokens': args.cache_tokens, 'source': args.metric_source, 'unit': 'tokens'},
+    'phase_tokens': phase_tokens,
+    'tokens_source': (args.tokens_source or 'host') if phase_tokens else None,
     'duration_source': 'host_report' if duration_s is not None else None,
     'duration_unit': 'seconds',
     'id':         decision_id,

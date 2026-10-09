@@ -112,8 +112,11 @@ With insufficient evidence, use the existing operation base plus one for
 legacy role. With migrated configuration this preserves the normal heuristic
 choices, except invalid/unsafe states. `policy: legacy` also retains the first
 eligible Laya score over the transitional threshold. Failure diagnosis and safety
-gates apply even in legacy mode. `escalation_jump` remains parsed for old consumers;
-v2 diagnoses first and does not use it to authorize retries.
+gates apply even in legacy mode. `escalation_jump` remains parsed and is used only by
+the legacy `limits` helper in `route.py`; v2 diagnoses first and escalates exactly one
+difficulty level (or ladder rung) after a verification or reasoning failure
+(see [protocol](protocol.md)). `max_same_level_retries` (2), `brief_max_words` (250)
+and `report_max_lines` (15) are positive integers.
 
 Comparable data requires same host, effective candidate, resolved version, effort,
 operation, file-count bucket, ambiguity, criticality and optional context class.

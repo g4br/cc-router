@@ -1,5 +1,9 @@
 """Provider-neutral eligibility and transparent policy selection."""
 from candidates import require
+import difficulty
+
+# verification/reasoning failures climb exactly one difficulty level; environment kinds retry in place
+ESCALATING_KINDS = ('verification_failed', 'design_or_reasoning_failure')
 
 
 def needs_approval(candidate):
@@ -55,6 +59,34 @@ def eligible_candidates(state, config, diagnosis):
         else:
             eligible.append(c)
     return eligible, excluded
+
+
+def level_name(candidate, config):
+    """Difficulty level of a candidate, or None when the host has no level map."""
+    if not config.get('level_to_candidate', {}).get(config['operator']):
+        return None
+    return list(config['laya_difficulty']['levels'])[difficulty.level_for_rung(candidate['legacy_rank'], config)]
+
+
+def escalation_step(state, config, eligible, diagnosis):
+    """Lowest eligible candidate at the next difficulty level above the failed one; never a jump.
+
+    Without a level map (or above the top level) the step is one ladder rung. Returns None unless
+    the retry is a verification/reasoning escalation.
+    """
+    failed = next((c for c in config['ladder'] if state.get('failed_with') in (c['id'], c['agent'])), None)
+    if not failed or diagnosis['kind'] not in ESCALATING_KINDS or not diagnosis['retry_allowed']:
+        return None
+    rank = failed['legacy_rank']
+    target = rank + 1
+    if level_name(failed, config):
+        levels = difficulty.level_candidates(config)
+        current = difficulty.level_for_rung(rank, config)
+        if current + 1 < len(levels):
+            target = levels[current + 1]['legacy_rank']
+    above = [c for c in eligible if c['legacy_rank'] >= target]
+    require(bool(above), 'candidates', 'no eligible candidate one level above the failed one')
+    return min(above, key=lambda c: c['legacy_rank'])
 
 
 def fallback(state, config, eligible, baseline):

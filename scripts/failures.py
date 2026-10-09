@@ -21,6 +21,9 @@ def diagnose(state, config):
         allowed, action = True, 'recover_same_candidate'
     if state.get('attempt_count', 1) >= config['max_attempts']:
         allowed, action = False, 'attempt_limit_reached'
+    elif allowed and action in ('recover_same_candidate', 'fix_same_candidate') \
+            and state.get('same_level_retries', 0) >= config['max_same_level_retries']:
+        allowed, action = False, 'same_level_retry_limit'
     elif allowed and not state.get('idempotent', False) and not state.get('retry_approved', False):
         allowed, action = False, 'approve_non_idempotent_retry'
     elif allowed and not state.get('diff_verified', False):

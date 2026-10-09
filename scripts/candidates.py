@@ -92,7 +92,8 @@ def validate_config(raw):
     config.setdefault('policy', 'balanced')
     require(config['policy'] in (*POLICIES, 'legacy'), 'policy')
     for key, default, low in [('file_limit', 3, 0), ('max_parallel', 8, 1), ('max_attempts', 3, 1),
-                              ('escalation_jump', 2, 1), ('min_cost_samples', 20, 2), ('min_calibration_samples', 20, 2)]:
+                              ('escalation_jump', 2, 1), ('min_cost_samples', 20, 2), ('min_calibration_samples', 20, 2),
+                              ('max_same_level_retries', 2, 1), ('brief_max_words', 250, 1), ('report_max_lines', 15, 1)]:
         config.setdefault(key, default)
         number(config[key], key, low, 10000, True)
     config.setdefault('success_threshold', .8)

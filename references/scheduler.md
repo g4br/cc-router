@@ -35,6 +35,8 @@ pending tasks with all dependencies `DONE`, within configured limits and the
 other host agents when determining free slots. The scheduler also counts its own
 outstanding reservations. It does not know other runs' reservations; one main
 orchestrator must allocate host capacity across runs.
+In Laya difficulty mode, `next` sends all tasks it routes in that cycle in one
+batch request (at most 64 per request).
 
 The response separates `dispatch` (new reservations) from `reserved` (outstanding
 ones, IDs only except in `status`) and `tasks` (statuses). **Execute only newly dispatched tasks.** Follow

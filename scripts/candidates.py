@@ -15,6 +15,20 @@ POLICIES = {
     'balanced': {'min_reliability': .7, 'tokens': .4, 'duration': .2, 'failure': .4},
     'performance': {'min_reliability': .7, 'tokens': .1, 'duration': .3, 'failure': .6},
 }
+DIFFICULTY = {
+    'question': 'How demanding is this task for an AI coding agent?',
+    'levels': {
+        'trivial': 'single read, lookup or format conversion with a checkable output',
+        'mechanical': 'pattern-following edit or small script with a test to run',
+        'routine': 'day-to-day coding with a clear scope',
+        'complex': 'several modules, design judgment or a non-local cause',
+        'open': 'long, ambiguous or autonomous work where errors are costly',
+    },
+}
+LEVEL_TO_CANDIDATE = {
+    'claude': dict(zip(DIFFICULTY['levels'], ('exec-haiku-low', 'exec-haiku-high', 'exec-sonnet-medium', 'exec-opus-medium', 'exec-opus-high'))),
+    'codex': dict(zip(DIFFICULTY['levels'], ('exec-luna-low', 'exec-sol-low', 'exec-sol-medium', 'exec-astra-medium', 'exec-astra-high'))),
+}
 
 
 def require(ok, field, message='invalid value'):
@@ -113,6 +127,22 @@ def validate_config(raw):
     require(type(config['laya_criteria']) is dict and set(config['laya_criteria']) == {'A', 'B'}, 'laya_criteria')
     for value in config['laya_criteria'].values():
         string(value, 'laya_criteria', 2000)
+    config.setdefault('laya_mode', 'per_candidate')
+    require(config['laya_mode'] in ('per_candidate', 'difficulty'), 'laya_mode')
+    config.setdefault('laya_difficulty', copy.deepcopy(DIFFICULTY))
+    difficulty = config['laya_difficulty']
+    require(type(difficulty) is dict and set(difficulty) == {'question', 'levels'}, 'laya_difficulty')
+    string(difficulty['question'], 'laya_difficulty.question', 2000)
+    require(type(difficulty['levels']) is dict and len(difficulty['levels']) == 5, 'laya_difficulty.levels', 'expected exactly 5 ordered levels')
+    for name, text in difficulty['levels'].items():
+        string(name, 'laya_difficulty.levels', 64)
+        string(text, f'laya_difficulty.levels.{name}', 2000)
+    config.setdefault('laya_rotations', 5)
+    number(config['laya_rotations'], 'laya_rotations', 1, 5, True)
+    config.setdefault('laya_min_confidence', .5)
+    number(config['laya_min_confidence'], 'laya_min_confidence', 0, 1)
+    config.setdefault('laya_min_confidence_calibrated', False)
+    require(type(config['laya_min_confidence_calibrated']) is bool, 'laya_min_confidence_calibrated')
     config.setdefault('agent_skills', [])
     strings(config['agent_skills'], 'agent_skills')
     policies = copy.deepcopy(POLICIES)
@@ -203,6 +233,26 @@ def validate_config(raw):
         for key, table in [('base_level_by_operation', base), ('ceiling_by_operation', ceilings)]:
             for value in table.values():
                 number(value, f'hosts.{host}.{key}', 0, 10000, True)
+    levels = list(difficulty['levels'])
+    mapping = config.setdefault('level_to_candidate', {})
+    require(type(mapping) is dict and set(mapping) <= set(config['hosts']), 'level_to_candidate', 'unknown host')
+    for host, data in config['hosts'].items():
+        ids = {c['id']: c for c in data['candidates']}
+        ids.update({c['agent']: c for c in data['candidates']})
+        default = LEVEL_TO_CANDIDATE.get(host)
+        if host not in mapping and default and set(default.values()) <= set(ids) and levels == list(default):
+            mapping[host] = dict(default)
+        if host not in mapping:
+            require(config['laya_mode'] != 'difficulty' or host not in config['laya_enabled_operators'],
+                    f'level_to_candidate.{host}', 'required for difficulty mode')
+            continue
+        field = f'level_to_candidate.{host}'
+        require(type(mapping[host]) is dict and list(mapping[host]) == levels, field, 'expected one candidate per level, in level order')
+        for level, name in mapping[host].items():
+            require(type(name) is str and name in ids, f'{field}.{level}', 'not a candidate on this host ladder')
+            mapping[host][level] = ids[name]['id']
+        ranks = [ids[name]['legacy_rank'] for name in mapping[host].values()]
+        require(ranks == sorted(ranks), field, 'candidate rungs must not decrease with difficulty')
     return config
 
 

@@ -17,7 +17,8 @@ import uuid
 from candidates import require, string, number
 from common import detect_operator, check_subscription, load_config, history_path, read_history, log_event
 from planning import plan, verify_changes
-from route import route_one, link_task, compact, decision_record
+from difficulty import MAX_STATES
+from route import route_one, link_task, compact, decision_record, difficulty_active, difficulty_answers, UNSET
 from state import check_state
 from telemetry import workflow_efficiency
 
@@ -68,44 +69,52 @@ def reserve(run, config, events, capacity):
     dispatch = []
     if any(t['state'].get('isolation') == 'sequential' for t in active):
         return dispatch
-    for step_id, task in tasks.items():
-        if slots == 0:
+    while slots > 0:
+        # Gather the next ready tasks, then route them with one Laya request (a blocked task frees its slot: gather again).
+        picked = []
+        for step_id, task in tasks.items():
+            if task['status'] != 'PENDING':
+                continue
+            dependencies = task['state'].get('depends_on', [])
+            if not all(tasks[d]['status'] == 'DONE' for d in dependencies):
+                continue
+            serial = task['state'].get('isolation') == 'sequential'
+            if serial and (active or dispatch or picked):
+                continue
+            state = copy.deepcopy(task['state'])
+            context = {d: tasks[d]['output_ref'] for d in dependencies}
+            state['description'] += '\nAcceptance: ' + task['acceptance']
+            if context:
+                state['description'] += '\nVerified dependency artifacts: ' + json.dumps(context, ensure_ascii=False)
+            check_state(state, config)
+            link_task(state, events, config)
+            picked.append((step_id, task, state, context, serial))
+            if serial or len(picked) == min(slots, MAX_STATES):
+                break
+        if not picked:
             break
-        if task['status'] != 'PENDING':
-            continue
-        dependencies = task['state'].get('depends_on', [])
-        if not all(tasks[d]['status'] == 'DONE' for d in dependencies):
-            continue
-        serial = task['state'].get('isolation') == 'sequential'
-        if serial and (active or dispatch):
-            continue
-        state = copy.deepcopy(task['state'])
-        context = {d: tasks[d]['output_ref'] for d in dependencies}
-        state['description'] += '\nAcceptance: ' + task['acceptance']
-        if context:
-            state['description'] += '\nVerified dependency artifacts: ' + json.dumps(context, ensure_ascii=False)
-        check_state(state, config)
-        link_task(state, events, config)
         started = time.monotonic()
-        decision = route_one(state, config, events, run['id'])
+        answers = difficulty_answers([p[2] for p in picked], config) if difficulty_active(config) else [UNSET] * len(picked)
+        decisions = [route_one(p[2], config, events, run['id'], answer) for p, answer in zip(picked, answers)]
         run['routing_seconds'] += time.monotonic() - started
-        task['decision'] = decision
-        task['status'] = 'BLOCKED' if decision['execution']['status'] == 'blocked' else 'RESERVED'
-        record = decision_record(state, decision)
-        record.update(event_id=uuid.uuid4().hex, run_id=run['id'])
-        run['outbox'].append(record)
-        if task['status'] == 'BLOCKED':
-            continue
-        emit(run, 'task_reserved', step_id=step_id, decision_id=decision['id'])
-        dispatch.append({'step_id': step_id, 'decision': compact(decision),
-                         'description': task['state']['description'], 'acceptance': task['acceptance'],
-                         'project_root': state['project_root'],
-                         'write_targets': state.get('write_targets', state.get('targets', [])),
-                         'read_targets': state.get('read_targets', []),
-                         'user_language': state.get('user_language'), 'dependencies': context})
-        slots -= 1
-        if serial:
-            break
+        for (step_id, task, state, context, serial), decision in zip(picked, decisions):
+            task['decision'] = decision
+            task['status'] = 'BLOCKED' if decision['execution']['status'] == 'blocked' else 'RESERVED'
+            record = decision_record(state, decision)
+            record.update(event_id=uuid.uuid4().hex, run_id=run['id'])
+            run['outbox'].append(record)
+            if task['status'] == 'BLOCKED':
+                continue
+            emit(run, 'task_reserved', step_id=step_id, decision_id=decision['id'])
+            dispatch.append({'step_id': step_id, 'decision': compact(decision),
+                             'description': task['state']['description'], 'acceptance': task['acceptance'],
+                             'project_root': state['project_root'],
+                             'write_targets': state.get('write_targets', state.get('targets', [])),
+                             'read_targets': state.get('read_targets', []),
+                             'user_language': state.get('user_language'), 'dependencies': context})
+            slots -= 1
+            if serial:
+                return dispatch
     return dispatch
 
 

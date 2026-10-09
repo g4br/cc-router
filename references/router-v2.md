@@ -87,6 +87,19 @@ is an explicit allowlist; `blocked_candidates` excludes unavailable/declined cho
 Empty batches/catalogues, duplicate IDs, invalid URL/schema/effort contracts and
 path escapes fail before decision events are written.
 
+### Laya difficulty keys
+
+`laya_mode`: `per_candidate` (default when missing) or `difficulty`; `backend`
+stays `heuristic` or `laya`. Difficulty mode uses `laya_difficulty` (`question` and
+exactly five ordered `levels`), `laya_rotations` (1 to 5, default 5),
+`laya_min_confidence` (0 to 1, default 0.5), `laya_min_confidence_calibrated`
+(boolean, default `false`) and `level_to_candidate` (per host, one candidate ID or
+agent per level; each must exist on that host ladder, with rungs that do not
+decrease with difficulty). A host with Laya enabled needs a mapping in difficulty
+mode. Missing keys are filled with defaults on load; `migrate.py` writes them to a
+file and keeps a timestamped `.bak` of the previous content. See
+[laya.md](laya.md#difficulty-mode) for the request contract and combination rules.
+
 ## Selection and policy
 
 Stages: validate → diagnose → eligible candidates → comparable evidence → policy →

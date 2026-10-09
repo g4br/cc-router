@@ -66,3 +66,58 @@ versions and incomplete metrics cannot drive empirical selection.
 The public checkpoint is not trained or fine-tuned by this project. Outcomes of
 selected candidates do not establish how untried alternatives would have performed.
 Tests use a small local mock HTTP server and do not load the checkpoint.
+
+## Difficulty mode
+
+Set `"laya_mode": "difficulty"` (default `per_candidate`, the mode above, unchanged).
+Laya answers one `choice` question, "How demanding is this task for an AI coding
+agent?", with five levels (`trivial`, `mechanical`, `routine`, `complex`, `open`).
+No model name appears in the request. Each level maps to one candidate per host
+through `level_to_candidate`; `xhigh`, `max` and Fable rungs stay reachable only by
+escalation or approval, as before.
+
+Contract, checked against laya-serve 0.3.26:
+
+- One `POST <laya_url>/batch` per `route.py` call or scheduler cycle, whatever the
+  number of tasks (1 to 64; more is an error, matching laya-serve `MAX_BATCH_STATES`).
+  Body: `{"states": [...], "questions": {...}, "model": "english"}`. Each state has
+  only `description` (English; above 60 words it is cut and a warning is printed) and
+  `operation`. `ambiguous`, `critical` and `files` stay with the heuristic.
+- `questions` holds `laya_rotations` copies (`difficulty#r0` ... `#r4`) of the same
+  question. Option keys are `L1` to `L5` (level order). Rotation `r` lists them as a
+  cyclic shift by `r`, so with 5 rotations every level takes every slot once.
+  laya-serve renders options in key insertion order and returns probabilities in that
+  order.
+- Response: `{"results": [{"answers": {"difficulty#r0": {"probabilities": {"L1": ...}}}}]}`,
+  one result per state, in order. The router requires keys `L1` to `L5`, values in
+  [0, 1] summing to 1, and averages each level over the rotations.
+
+The decision, its `laya` key and the `history.jsonl` event carry `level`,
+`distribution` (averaged), `answer_confidence` (maximum of the averaged
+distribution), `expected_level` (0-based, probability-weighted), `heuristic_level`,
+`combination`, `final_level`, `preferred`, `batch_states` and `request_s`.
+
+Combination with the heuristic: the heuristic rung maps to the highest level whose
+candidate rung is not above it (level 0 if none). Same level: use it. One level
+apart: the higher if the task is `critical`, else the lower. Two or more apart: the
+heuristic decides and the event says `conflict: heuristic used`. The chosen level's
+candidate is only a preference: floors, ceilings, approval, eligibility and failure
+diagnosis still apply afterwards. If `answer_confidence` is below
+`laya_min_confidence`, the heuristic decides and the backend is `laya (abstained)`.
+
+`laya_min_confidence` 0.5 is **uncalibrated** (`laya_min_confidence_calibrated`
+is `false` and every event says so). Treat it as a placeholder until outcomes exist.
+
+Live check on 2026-10-09, laya-serve 0.3.26, checkpoint `english`, CPU, 127.0.0.1:8001:
+
+- Rotation: one state, rotations `r0` (`L1..L5`) and `r1` (`L2..L5,L1`). The response
+  listed the probabilities in the key order sent for both. Every key's probability
+  changed between the two rotations (for example `L4` 0.4557 against 0.4922), and a
+  repeat of `r0` returned identical values. So slot order reaches the model and the
+  runs are deterministic.
+- Latency: a batch of 8 tasks with 5 rotations (40 rows, one request) took 8.6 to
+  8.7 s wall clock over 5 runs (about 0.21 s per row). One task with 5 rotations
+  took 1.2 s. The default `laya_timeout_s` is 30 s: on this CPU a batch of 64 tasks
+  would take about 70 s and time out, so raise `laya_timeout_s` for large batches.
+- On eight sample tasks, `answer_confidence` ranged from 0.30 to 0.82; five of
+  eight were below 0.5, so abstention is frequent at this threshold.

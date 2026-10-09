@@ -4,10 +4,9 @@ import json
 import uuid
 from pathlib import Path
 from statistics import median
-from urllib.request import Request, build_opener, HTTPRedirectHandler, ProxyHandler
 from urllib.error import URLError, HTTPError
 
-from common import load_config, log_event, check_subscription, detect_operator, history_path, laya_state, last_active_rung, skill_dir, agents_dir
+from common import post_json, load_config, log_event, check_subscription, detect_operator, history_path, laya_state, last_active_rung, skill_dir, agents_dir
 
 #-----------------------------------------------------------
 # Functions
@@ -64,11 +63,6 @@ def heuristic_level(state, config):
 
 SWAPPED_SUFFIX = '#swapped'
 
-class NoRedirect(HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
-        raise ValueError("laya response: redirects are not permitted")
-
-
 def laya_probabilities(state, config):
     # one binary question per rung, with neutral keys: Laya's noul type
     # tends to follow the true/false labels instead of the content.
@@ -84,15 +78,8 @@ def laya_probabilities(state, config):
         questions[rung['agent'] + SWAPPED_SUFFIX] = {'type': 'choice', 'instructions': instructions, 'criteria': swapped}
     # Explicitly select the public English checkpoint used by this skill.
     request_body = {'state': laya_state(state), 'questions': questions, 'model': config['laya_checkpoint']}
-    body = json.dumps(request_body, ensure_ascii=False).encode('utf-8')
-    headers = {'Content-Type': 'application/json'}
-    # laya-serve only requires a key when started with LAYA_API_KEY
-    if os.environ.get('LAYA_API_KEY'):
-        headers['Authorization'] = f"Bearer {os.environ['LAYA_API_KEY']}"
-    request = Request(config['laya_url'], data=body, headers=headers)
     try:
-        with build_opener(ProxyHandler({}), NoRedirect()).open(request, timeout=config['laya_timeout_s']) as response:
-            answers = json.load(response)['answers']
+        answers = post_json(config['laya_url'], request_body, config['laya_timeout_s'])['answers']
         from candidates import number
         values = {}
         for rung in config['ladder']:
@@ -193,9 +180,29 @@ from common import read_history
 from failures import diagnose
 from selection import eligible_candidates, select, needs_approval
 from telemetry import profile, estimates
+import difficulty
 
 
-def route_one(state, config, events, batch_id=None):
+UNSET = object()
+
+
+def difficulty_active(config):
+    return (config['backend'] == 'laya' and config['laya_mode'] == 'difficulty'
+            and config['operator'] in config['laya_enabled_operators'])
+
+
+def difficulty_answers(states, config):
+    """One Laya request for all states. None per state when the service is unreachable."""
+    try:
+        return difficulty.request(states, config)
+    except HTTPError:
+        raise ValueError('laya response: HTTP error; check local service contract') from None
+    except (URLError, TimeoutError, ConnectionError):
+        print('Laya unavailable; deciding with the heuristic', file=sys.stderr)
+        return [None] * len(states)
+
+
+def route_one(state, config, events, batch_id=None, answer=UNSET):
     diagnosis = diagnose(state, config)
     eligible, excluded = eligible_candidates(state, config, diagnosis)
     decision_id, attempt_id = uuid.uuid4().hex, uuid.uuid4().hex
@@ -223,7 +230,18 @@ def route_one(state, config, events, batch_id=None):
     backend, scores = config['backend'], None
     if backend == 'laya' and config['operator'] not in config['laya_enabled_operators']:
         backend = 'heuristic (host Laya disabled)'
-    if backend == 'laya':
+    laya = None
+    if backend == 'laya' and config['laya_mode'] == 'difficulty':
+        if answer is UNSET:
+            answer = difficulty_answers([state], config)[0]
+        if answer is None:
+            backend = 'heuristic (laya unavailable)'
+        else:
+            laya = difficulty.combine(answer, baseline, state, config)
+            baseline = laya.pop('baseline')
+            if laya['combination'] == 'abstained':
+                backend = 'laya (abstained)'
+    elif backend == 'laya':
         try:
             by_agent = laya_probabilities(state, dict(config, ladder=eligible))
             scores = {c['id']: by_agent[c['agent']] for c in eligible}
@@ -240,6 +258,10 @@ def route_one(state, config, events, batch_id=None):
             if above:
                 chosen = min(above, key=lambda c: c['legacy_rank'])
         selection_reasons = ['legacy operation/flags and first score above transitional threshold; current safety gates apply']
+    if laya:
+        selection_reasons.append(f"laya difficulty={laya['level']} (confidence {laya['answer_confidence']:.3f}, "
+                                 f"{'calibrated' if laya['min_confidence_calibrated'] else 'uncalibrated'} threshold {laya['min_confidence']}), "
+                                 f"heuristic={laya['heuristic_level']}: {laya['combination']} -> {laya['final_level']}")
     if scores and not any(s >= config['success_threshold'] for s in scores.values()):
         backend = 'laya (no opinion)'
     if config['operator'] == 'claude' and not (agents_dir / f"{chosen['agent']}.md").exists():
@@ -259,6 +281,7 @@ def route_one(state, config, events, batch_id=None):
                   backend=backend, confidence=confidence, uncertainty='observational estimates; untried outcomes unknown',
                   reason='; '.join(reasons + selection_reasons), evidence=evidence, objectives=objectives,
                   scores=scores, score_kind='uncalibrated' if scores else None,
+                  **({'laya': laya} if laya else {}),
                   billing_mode=chosen['billing_mode'],
                   execution={'mode': 'native', 'status': 'requires_host_confirmation', 'applied': False,
                              'effective_candidate': None, 'resolved_model': None, 'effective_effort': None,
@@ -345,7 +368,8 @@ def main():
     batch_id = uuid.uuid4().hex if is_batch else None
     for state in states:
         link_task(state, events, config)
-    decisions = [route_one(state, config, events, batch_id) for state in states]
+    answers = difficulty_answers(states, config) if difficulty_active(config) else [UNSET] * len(states)
+    decisions = [route_one(state, config, events, batch_id, answer) for state, answer in zip(states, answers)]
     if schedule:
         for decision, step in zip(decisions, schedule):
             decision['scheduling'] = step

@@ -13,6 +13,7 @@ from pathlib import Path
 from datetime import datetime
 import uuid
 import fcntl
+from urllib.request import Request, build_opener, HTTPRedirectHandler, ProxyHandler
 from candidates import for_host
 
 skill_dir     = Path(__file__).resolve().parent.parent
@@ -56,6 +57,19 @@ def laya_state(state):
     # The operator writes description in English for Laya. User language, retry
     # controls and write targets stay out of the task-difficulty input.
     return {name: state[name] for name in ('description', 'operation', 'files', 'ambiguous', 'critical')}
+
+class NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise ValueError("laya response: redirects are not permitted")
+
+def post_json(url, body, timeout):
+    # local Laya only: no proxy, no redirect; laya-serve requires a key only when started with LAYA_API_KEY
+    headers = {'Content-Type': 'application/json'}
+    if os.environ.get('LAYA_API_KEY'):
+        headers['Authorization'] = f"Bearer {os.environ['LAYA_API_KEY']}"
+    request = Request(url, data=json.dumps(body, ensure_ascii=False).encode('utf-8'), headers=headers)
+    with build_opener(ProxyHandler({}), NoRedirect()).open(request, timeout=timeout) as response:
+        return json.load(response)
 
 def find_skill(name):
     # 'plugin:skill' lives under ~/.claude/plugins; a bare 'skill' under ~/.claude/skills

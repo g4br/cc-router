@@ -1,0 +1,10 @@
+{"description": "Read a CSV file and report how many rows and columns it has.", "operation": "read", "label": null, "source": "example"}
+{"description": "Find every place where a deprecated helper function is called and list the file and line.", "operation": "search", "label": null, "source": "example"}
+{"description": "Rename a configuration key across all files in a small project and update the matching test fixtures.", "operation": "mechanical_edit", "label": null, "source": "example"}
+{"description": "Change a default timeout from 30 to 60 seconds and update the one test that checks it.", "operation": "tweak", "label": null, "source": "example"}
+{"description": "Add a command line option that exports results as JSON, with validation, help text and tests.", "operation": "implementation", "label": null, "source": "example"}
+{"description": "Write a short usage guide for an existing module, with two runnable examples.", "operation": "writing", "label": null, "source": "example"}
+{"description": "Compute monthly averages from a table of measurements, flag outliers and summarise the trend.", "operation": "data_analysis", "label": null, "source": "example"}
+{"description": "A test fails only when the suite runs in parallel. Find the cause and fix it.", "operation": "debugging", "label": null, "source": "example"}
+{"description": "Review a pull request that changes how retries are handled and point out risks to existing callers.", "operation": "review", "label": null, "source": "example"}
+{"description": "Design how a monolithic script should be split into modules, covering data flow, interfaces and a migration order.", "operation": "architecture", "label": null, "source": "example"}

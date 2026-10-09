@@ -1,8 +1,10 @@
 # Optional local Laya backend
 
-The bundled `config/ladder.json` ships with `backend: laya`, but the Laya difficulty
-gate is not validated yet. `install.py` asks (default no, or `--backend laya|heuristic`)
-before it installs Laya and downloads the public English checkpoint.
+The bundled `config/ladder.json` ships with `backend: heuristic` and
+`laya_mode: per_candidate`. These defaults reflect the [gate](#gate) below: the Laya
+difficulty mode has not passed it, so Laya is off until you opt in. `install.py` asks
+(default no, or `--backend laya|heuristic`) before it installs Laya and downloads the
+public English checkpoint.
 Routing never starts it during a unit test or ordinary decision: the skill runs
 `start_services.sh --check` on invocation and asks the user before starting. The operator supplies a faithful English summary
 and keeps the user's language for reports.
@@ -121,3 +123,58 @@ Live check on 2026-10-09, laya-serve 0.3.26, checkpoint `english`, CPU, 127.0.0.
   would take about 70 s and time out, so raise `laya_timeout_s` for large batches.
 - On eight sample tasks, `answer_confidence` ranged from 0.30 to 0.82; five of
   eight were below 0.5, so abstention is frequent at this threshold.
+
+## Gate
+
+Before `backend: laya` with `laya_mode: difficulty` becomes the default, the offline
+evaluation must show that it saves tokens without under-routing more. Run it with:
+
+```bash
+python3 scripts/eval_difficulty.py --operator claude                 # live laya-serve on laya_url
+python3 scripts/eval_difficulty.py --operator claude --no-laya       # heuristic only
+python3 scripts/eval_difficulty.py --history-labels tests/data/history_candidates.local.jsonl
+```
+
+Inputs: `tests/data/difficulty_gold.jsonl` (labels are yours to fill, see
+`tests/data/README.md`) and, optionally, exact labels derived from the history by
+`scripts/labels_from_history.py` (failed at level k then succeeded at k+1 gives the exact
+label k+1; a first-try success at level k is censored, "level <= k", and the evaluation
+ignores it). The four strategies are the heuristic, Laya `per_candidate`, Laya `difficulty`
+(raw argmax level) and `combined` (difficulty plus heuristic, as `route.py` uses it). Metrics:
+exact accuracy, within-1 accuracy, under-routing and over-routing rates, and expected tokens
+per task, overall and per operation. Expected tokens per candidate are the median of the
+tokens in `history.jsonl`, else `expected_tokens_by_candidate` in the config; if neither
+exists for a candidate the run stops and names it. An under-routed task costs its predicted
+level plus one more execution at the next level. The report goes to `--out` (default
+`difficulty-eval.json` next to `history.jsonl`).
+
+PASS needs all of: `difficulty` or `combined` cuts expected tokens by at least
+`gate_token_saving_min` (0.10) against the heuristic; its under-routing rate rises by at most
+`gate_under_routing_max_increase` (0.02, absolute); every level has at least
+`gate_min_tasks_per_level` (10) labelled tasks. Otherwise FAIL, with the reasons.
+
+**Verdict 2026-10-09: FAIL (insufficient labels).** The 10 shipped gold tasks are unlabelled
+and 0 exact labels exist in the history (31 censored, 0 exact, from
+`labels_from_history.py --operator claude`), so every level has 0 labelled tasks and no
+saving can be measured. This is a statement about missing data, not about Laya's quality.
+Consequence: `backend: heuristic`, `laya_mode: per_candidate`. Re-run the command above
+after labelling at least 50 tasks (10 per level). If it prints PASS, set
+`"backend": "laya"` and `"laya_mode": "difficulty"` in `config/ladder.json` (or run
+`install.py --backend laya`) and update this section.
+
+`level_to_candidate` is left as shipped. Whether a different mapping fits better depends on
+the labels, so it is pending them.
+
+## Calibration
+
+`scripts/calibrate_difficulty.py` needs the live server and at least `--min-labels` (default
+20) exact labels; with fewer it refuses and writes nothing. It fits a temperature for the
+averaged 5-way distribution (grid search on negative log-likelihood) and the lowest
+`laya_min_confidence` whose answers reach `--target-accuracy` (0.8) at `--min-coverage`
+(0.2). The result goes to `laya-calibration.json` next to `history.jsonl`, never into the
+skill folder. When that file exists, `difficulty.py` applies the temperature to every answer
+and uses its `laya_min_confidence` instead of the config value; the decision then reports
+`min_confidence_calibrated: true`. The config value stays the fallback. An invalid file
+stops routing with `laya calibration: invalid file`. Delete the file to go back.
+laya's own `fit_abstention_thresholds` was not used: it takes raw logits records, not the
+averaged distribution of this mode.

@@ -103,6 +103,10 @@ def check_subscription():
 def history_path(operator):
     return Path.home() / ('.claude' if operator == 'claude' else '.codex') / 'cc-router' / 'history.jsonl'
 
+def calibration_path(operator):
+    # fitted by scripts/calibrate_difficulty.py; local state, never inside the skill folder
+    return history_path(operator).with_name('laya-calibration.json')
+
 def decision_events(decision_id, operator=None):
     # returns the decision and the events tied to it; a wrong id would become an orphan record
     history_file = history_path(operator or detect_operator())

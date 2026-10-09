@@ -1,5 +1,5 @@
 {
-  "backend": "laya",
+  "backend": "heuristic",
   "laya_url": "http://127.0.0.1:8001/v1/systemone",
   "laya_urls": {"claude": "http://127.0.0.1:8001/v1/systemone", "codex": "http://127.0.0.1:8001/v1/systemone"},
   "laya_enabled_operators": ["claude", "codex"],
@@ -27,6 +27,13 @@
   "laya_rotations": 5,
   "laya_min_confidence": 0.5,
   "laya_min_confidence_calibrated": false,
+  "gate_token_saving_min": 0.10,
+  "gate_under_routing_max_increase": 0.02,
+  "gate_min_tasks_per_level": 10,
+  "expected_tokens_by_candidate": {
+    "claude": {"exec-haiku-low": null, "exec-haiku-medium": null, "exec-haiku-high": null, "exec-sonnet-medium": null, "exec-sonnet-high": null, "exec-opus-medium": null, "exec-opus-high": null, "exec-opus-xhigh": null, "exec-opus-max": null, "exec-fable-low": null, "exec-fable-medium": null, "exec-fable-high": null, "exec-fable-xhigh": null},
+    "codex": {"exec-luna-low": null, "exec-sol-low": null, "exec-sol-medium": null, "exec-sol-high": null, "exec-astra-medium": null, "exec-astra-high": null, "exec-astra-xhigh": null, "exec-astra-max": null}
+  },
   "level_to_candidate": {
     "claude": {"trivial": "exec-haiku-low", "mechanical": "exec-haiku-high", "routine": "exec-sonnet-medium", "complex": "exec-opus-medium", "open": "exec-opus-high"},
     "codex":  {"trivial": "exec-luna-low",  "mechanical": "exec-sol-low",    "routine": "exec-sol-medium",    "complex": "exec-astra-medium", "open": "exec-astra-high"}

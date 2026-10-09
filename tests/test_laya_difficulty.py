@@ -21,6 +21,18 @@ BIAS = 0.3
 LEVELS = ['trivial', 'mechanical', 'routine', 'complex', 'open']
 
 
+def setUpModule():
+    # difficulty.calibration reads a file under HOME; never let the user's real one reach these tests
+    global old_home, home
+    old_home, home = os.environ.get('HOME'), tempfile.TemporaryDirectory()
+    os.environ['HOME'] = home.name
+
+
+def tearDownModule():
+    os.environ['HOME'] = old_home
+    home.cleanup()
+
+
 def peak(index):
     return [0.9 if i == index else 0.025 for i in range(5)]
 

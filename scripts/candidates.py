@@ -143,6 +143,11 @@ def validate_config(raw):
     number(config['laya_min_confidence'], 'laya_min_confidence', 0, 1)
     config.setdefault('laya_min_confidence_calibrated', False)
     require(type(config['laya_min_confidence_calibrated']) is bool, 'laya_min_confidence_calibrated')
+    for key, default in [('gate_token_saving_min', .10), ('gate_under_routing_max_increase', .02)]:
+        config.setdefault(key, default)
+        number(config[key], key, 0, 1)
+    config.setdefault('gate_min_tasks_per_level', 10)
+    number(config['gate_min_tasks_per_level'], 'gate_min_tasks_per_level', 1, 100000, True)
     config.setdefault('agent_skills', [])
     strings(config['agent_skills'], 'agent_skills')
     policies = copy.deepcopy(POLICIES)
@@ -233,6 +238,14 @@ def validate_config(raw):
         for key, table in [('base_level_by_operation', base), ('ceiling_by_operation', ceilings)]:
             for value in table.values():
                 number(value, f'hosts.{host}.{key}', 0, 10000, True)
+    # fallback for scripts/eval_difficulty.py when history has no tokens for a candidate; null = unknown
+    expected = config.setdefault('expected_tokens_by_candidate', {})
+    require(type(expected) is dict and set(expected) <= set(config['hosts']), 'expected_tokens_by_candidate', 'unknown host')
+    for host, table in expected.items():
+        require(type(table) is dict, f'expected_tokens_by_candidate.{host}')
+        for name, value in table.items():
+            if value is not None:
+                number(value, f'expected_tokens_by_candidate.{host}.{name}', 1, 1e9)
     levels = list(difficulty['levels'])
     mapping = config.setdefault('level_to_candidate', {})
     require(type(mapping) is dict and set(mapping) <= set(config['hosts']), 'level_to_candidate', 'unknown host')
